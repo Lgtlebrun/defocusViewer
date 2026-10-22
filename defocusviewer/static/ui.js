@@ -1,5 +1,9 @@
 // Small DOM and API helpers shared by the tabs.
 
+export const EXPORT_DPI = 400;
+// Plotly's PNG export (camera button, right-click copy / save): the plot's CSS pixels are 96 dpi
+export const PLOT_CONFIG = { displaylogo: false, responsive: true, toImageButtonOptions: { format: 'png', scale: EXPORT_DPI / 96 } };
+
 export function h(tag, attrs = {}, ...children) {
   const el = document.createElement(tag);
   for (const [k, v] of Object.entries(attrs || {})) {
@@ -10,7 +14,7 @@ export function h(tag, attrs = {}, ...children) {
     else if (k in el && typeof v !== 'string') el[k] = v;
     else el.setAttribute(k, v === true ? '' : v);
   }
-  for (const c of children.flat()) {
+  for (const c of children.flat(Infinity)) {
     if (c === undefined || c === null || c === false) continue;
     el.append(c instanceof Node ? c : document.createTextNode(String(c)));
   }

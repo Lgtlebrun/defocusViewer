@@ -52,3 +52,12 @@ def test_pinned_runs_kept_on_the_server(client, config):
     assert client.post("/api/pinned", json={"run": RUN, "pinned": True}).json() == [RUN]      # once
     assert (config.state_dir / "pinned_runs.json").exists()
     assert client.post("/api/pinned", json={"run": RUN, "pinned": False}).json() == []
+
+
+def test_info_has_a_readable_summary(client):
+    client.cookies.set(COOKIE, "secret")
+    info = client.get("/api/run/info", params={"run": RUN}).json()
+    titles = [s["title"] for s in info["summary"]]
+    assert titles[:2] == ["Run", "Routines"]
+    run = dict(info["summary"][0]["rows"])
+    assert run["type of test"].startswith("stability") and run["fibers"] == "2: Fa, Fb"

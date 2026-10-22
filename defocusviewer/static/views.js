@@ -1,7 +1,7 @@
 // The images of a spot as Plotly heatmaps, laid out as a matrix: rows are quantities (data, model, residual, PSF,
 // source, pupil, wavefront), columns are representations (image or |FFT|, and a scale). Zoom is shared between the
 // panels of one domain (image pixels, source pixels, pupil radii, and their frequencies).
-import { h, cssVar } from './ui.js';
+import { h, cssVar, PLOT_CONFIG } from './ui.js';
 
 export const QUANTITIES = {
   data: { label: 'Data', domain: 'image', ghost: true },
@@ -285,7 +285,7 @@ export function heatmap(div, panel, values, zrange, ghostBox, options) {
     yaxis: { ...axis, scaleanchor: 'x', constrain: 'domain',
       ...(zoomed ? { range: [SOURCE_ZOOM + 0.5, -SOURCE_ZOOM - 0.5] } : { autorange: 'reversed' }) },
   };
-  return Plotly.react(div, [trace, ...extra], layout, { displaylogo: false, responsive: true,
+  return Plotly.react(div, [trace, ...extra], layout, { ...PLOT_CONFIG,
     modeBarButtonsToRemove: ['select2d', 'lasso2d', 'autoScale2d', 'toggleSpikelines'] });
 }
 

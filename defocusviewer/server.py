@@ -15,7 +15,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTex
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import catalog, cluster, figures, jobs, jointfit, plots, spots
+from . import catalog, cluster, figures, jobs, jointfit, plots, spots, summary
 from .config import Config
 
 STATIC = Path(__file__).parent / "static"
@@ -192,8 +192,12 @@ def create_app(config: Config, token: str, background: bool = True) -> FastAPI:
             except Exception:  # an unreadable config is shown raw
                 pass
         results = sorted((p.name, p.stat().st_size) for p in (path / "results").glob("*") if p.is_file())
+        try:
+            readable = summary.run_summary(path, [j for j in registry.all(500) if j["run"] == run])
+        except Exception as e:  # a run in an unexpected format still shows its config and log
+            readable = [{"title": "Summary", "rows": [["could not be built", f"{type(e).__name__}: {e}"]]}]
         return {"key": run, "path": str(path), **catalog.summary(path), "device": catalog.device_of(config, run),
-                "config": config_text, "results": results, "log": jobs.tail(path / "log.log", 20000)}
+                "summary": readable, "config": config_text, "results": results, "log": jobs.tail(path / "log.log", 20000)}
 
     @app.get("/api/run/plots")
     def run_plots(run: str):

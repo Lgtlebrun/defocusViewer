@@ -1,6 +1,6 @@
 // The Spots subtab: full field of view, filters, timeline and table of the spots on the left, one spot (metadata,
 // fit, images) on the right.
-import { h, api, post, q, toast, fmt, getHash, setHash, cssVar } from './ui.js';
+import { h, api, post, q, toast, fmt, getHash, setHash, cssVar, PLOT_CONFIG } from './ui.js';
 import { QUANTITIES, loadOptions, arrays, panelValues, columnLabel, panelLabel, range, heatmap, zoomGroup, zoomKey, viewToggles } from './views.js';
 import { addPin } from './compare.js';
 import { jointFitModal } from './analyses.js';
@@ -139,7 +139,7 @@ function drawTimeline(list, routines) {
     margin: { l: 50, r: 8, t: 26, b: 30 }, paper_bgcolor: cssVar('--surface-0'), plot_bgcolor: cssVar('--surface-1'),
     font: { size: 11, color: cssVar('--text-secondary') }, legend: { orientation: 'h', y: 1.15, x: 0 },
     xaxis: { ...axis, type: 'date' }, yaxis: { ...axis, type: 'category', categoryorder: 'category descending' },
-  }, { displaylogo: false, responsive: true, modeBarButtonsToRemove: ['select2d', 'lasso2d'] });
+  }, { ...PLOT_CONFIG, modeBarButtonsToRemove: ['select2d', 'lasso2d'] });
   els.timeline.on('plotly_click', (event) => {
     const img = event.points?.[0]?.customdata?.[0];
     if (img) openSpot(img);

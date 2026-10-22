@@ -10,6 +10,7 @@ from matplotlib.patches import Rectangle
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 
+DPI = 400          # resolution of the image (and of anything rasterised) inside the PDF
 COLOUR_MAPS = {"viridis": "viridis", "cividis": "cividis", "inferno": "inferno", "magma": "magma", "gray": "gray",
                "hot": "hot", "blues": "am_seq", "blue-red": "am_div", "purple-green": "PRGn", "brown-teal": "BrBG"}
 
@@ -40,6 +41,6 @@ def panel_pdf(panel: dict) -> bytes:
     ax.set_xlabel(panel.get("xlabel", "x (px)"))
     ax.set_ylabel(panel.get("ylabel", "y (px)"))
     buffer = io.BytesIO()
-    fig.savefig(buffer, format="pdf")
+    fig.savefig(buffer, format="pdf", dpi=DPI)
     plt.close(fig)
     return buffer.getvalue()

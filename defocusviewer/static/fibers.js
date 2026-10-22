@@ -1,6 +1,6 @@
 // The Fibers subtab: the fitted quantities of every spot against time or stage position, one row per quantity, fibers
 // overlaid (one colour each), routines told apart by their marker; a click opens the spot.
-import { h, api, q, setHash, cssVar } from './ui.js';
+import { h, api, q, setHash, cssVar, PLOT_CONFIG } from './ui.js';
 import { ROUTINE_ORDER, routineStyle } from './spots.js';
 
 const QUANTITIES = [
@@ -137,7 +137,7 @@ export async function renderFibers(body, info) {
     layout.xaxis = { ...axis, anchor: quantities.length > 1 ? `y${quantities.length}` : 'y', title: { text: X_AXES[state.xAxis], font: { size: 10 } },
       type: state.xAxis === 'time' ? 'date' : 'linear' };
     plot.replaceChildren();
-    Plotly.react(plot, traces, layout, { displaylogo: false, responsive: true, modeBarButtonsToRemove: ['select2d', 'lasso2d'] });
+    Plotly.react(plot, traces, layout, { ...PLOT_CONFIG, modeBarButtonsToRemove: ['select2d', 'lasso2d'] });
     plot.on('plotly_click', (event) => {
       const img = event.points?.[0]?.customdata?.[0];
       if (img) { setHash({ sub: null, img }); window.dispatchEvent(new PopStateEvent('popstate')); }

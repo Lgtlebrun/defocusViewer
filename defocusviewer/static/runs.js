@@ -169,9 +169,12 @@ async function renderInfo(body, info) {
   body.replaceChildren(h('p', { class: 'pad muted' }, 'loading…'));
   const data = await api(`/api/run/info?${q({ run: info.key })}`);
   const log = h('pre', { style: 'max-height:420px' }, data.log || '(no log.log)');
+  const cards = (data.summary || []).map((section) => h('div', { class: 'card' }, h('h3', {}, section.title),
+    h('dl', { class: 'kv' }, section.rows.map(([label, value]) => [h('dt', {}, label), h('dd', { style: 'font-family:var(--font);font-size:12.5px' }, value)]))));
   body.replaceChildren(h('div', { class: 'pad', style: 'display:flex;flex-direction:column;gap:12px' },
     h('div', { class: 'small muted mono' }, data.path),
-    h('details', { open: true }, h('summary', {}, 'meta/config.yaml'), h('pre', { style: 'max-height:420px' }, data.config || '(none)')),
+    h('div', { class: 'summary-grid' }, cards),
+    h('details', {}, h('summary', {}, 'meta/config.yaml'), h('pre', { style: 'max-height:420px' }, data.config || '(none)')),
     h('details', {}, h('summary', {}, `results/ (${data.results.length} files)`),
       h('table', { class: 'grid' }, h('tbody', {}, data.results.map(([name, size]) =>
         h('tr', {}, h('td', { class: 'mono' }, name), h('td', {}, `${(size / 1024).toFixed(1)} kB`)))))),

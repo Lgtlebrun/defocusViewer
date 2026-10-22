@@ -1,5 +1,5 @@
 // Right-click menu of an image panel: copy or save it as PNG, save it as a PDF figure, save its values as .npy.
-import { h, toast } from './ui.js';
+import { h, toast, EXPORT_DPI } from './ui.js';
 import { AXES, domainOf, panelLabel } from './views.js';
 
 let open = null;
@@ -33,7 +33,7 @@ export function npyBlob(values, rows, cols) {
 }
 
 async function png(div) {
-  const url = await Plotly.toImage(div, { format: 'png', scale: 2, width: div.clientWidth, height: div.clientHeight });
+  const url = await Plotly.toImage(div, { format: 'png', scale: EXPORT_DPI / 96, width: div.clientWidth, height: div.clientHeight });
   return (await fetch(url)).blob();
 }
 
