@@ -19,7 +19,7 @@ from DefocusTest.analysis.SpotLabeler import drop_overwritten_images, load_label
 from DefocusTest.analysis.ZernikeStabilityAnalysis import _fit_candidate, load_crop_side, load_fnum, load_pupil_scale
 from DefocusTest.devices import DESI
 from DefocusTest.imgDF import load_stack
-from DefocusTest.postprocessing import GhostMasks
+from DefocusTest.postprocessing import GhostMasks, box_corner, box_side, detect_ghost
 from PIL import Image
 from posUtils.define import UMperCOUNT
 
@@ -71,6 +71,7 @@ class RunState:
             self.noll = tuple(int(j) for j in np.atleast_1d(self.rundir.loadResult("zernike_noll")))
         self.masks = GhostMasks.load(self.rundir)
         self.fits = self._saved_fits()
+        self.fiber_ghosts = {}
 
     def image(self, img: str) -> np.ndarray:
         crop = None if self.df.loc[img, "fiber"] == DESI else self.crop_side
@@ -139,11 +140,9 @@ class RunState:
                     "params": [float(row[c]) for c in ("r", "x0", "y0", "c4")] + [float(row[f"c{j}"]) for j in noll[1:]],
                     "residual_frac": float(row.get("residual_frac", np.nan)), "sigma_c4": float(row.get("sigma_c4", np.nan))})
 
-    def weights(self, fiber: str, shape, ghost: str):
-        return self.masks.weights(fiber, shape) if ghost == "on" and self.masks is not None else None
-
     def ghost_box(self, fiber: str, shape) -> dict | None:
-        if self.masks is None:
+        """{x0, y0, side, gx, gy} of the fiber in the run's ghost masks, None when the run has none for it."""
+        if self.masks is None or fiber == DESI:
             return None
         box = self.masks.box(fiber, shape)
         if box is None:
@@ -246,19 +245,24 @@ def load_viewer_fit(folder: Path | None, img: str, ghost: str, st: RunState) -> 
     return cached if cached.get("stamp") == st.stamp() else None
 
 
+def box_weights(shape, box: dict | None):
+    """Weights with 0 in a ghost box {x0, y0, side} (as the masked fits use them), None without a box."""
+    return None if box is None else fit.ghost_box_weights(shape, (box["x0"], box["y0"], box["side"]))
+
+
 def detail(path: Path, img: str, ghost: str, viewer_fits: Path | None = None) -> dict:
     """Metadata, fits and images of one spot: data, model, residual = model - data, and the model's parts (components).
 
-    `needs` says what is missing to show a model: "joint_fit" (the rundir has none) or "refit" (no saved or cached fit
-    with this ghost setting)."""
+    ghost "on" uses the fiber's box of the run's ghost masks, else the box the viewer found on this spot (refit). `needs`
+    says what is missing to show a model: "joint_fit" (the rundir has none) or "refit" (no saved or cached fit with
+    this ghost setting)."""
     st = state(path)
     if img not in st.df.index:
         raise KeyError(img)
     row = st.df.loc[img]
     fiber = str(row["fiber"])
     image = st.image(img)
-    ghost_box = st.ghost_box(fiber, image.shape) if row["fiber"] != DESI else None
-    if ghost_box is None:
+    if fiber == DESI:
         ghost = "off"
     meta = {c: (None if pd.isna(row[c]) else row[c].isoformat() if c == "timestamp" else row[c].item()
                 if hasattr(row[c], "item") else row[c]) for c in COLUMNS if c in row.index}
@@ -270,16 +274,19 @@ def detail(path: Path, img: str, ghost: str, viewer_fits: Path | None = None) ->
     chosen = next((f for f in saved if f["ghost"] == ghost), None)
     viewer = load_viewer_fit(viewer_fits, img, ghost, st)
     shown = chosen or (dict(viewer, source="viewer fit") if viewer else None)
-    out = {"img": img, "fiber": fiber, "meta": meta, "saved": saved, "viewer_fit": viewer, "fit": shown,
-           "ghost": ghost, "ghost_box": ghost_box, "ghost_masks": st.masks is not None, "joint_fit": st.joint,
+    run_box = st.ghost_box(fiber, image.shape)
+    box = run_box or (shown or {}).get("ghost_box")
+    weights = box_weights(image.shape, box) if ghost == "on" else None
+    out = {"img": img, "fiber": fiber, "meta": meta, "saved": saved, "viewer_fit": viewer, "fit": shown, "ghost": ghost,
+           "ghost_box": box, "ghost_box_source": "run" if run_box else "spot" if box else None,
+           "ghost_found": (shown or {}).get("ghost_found"), "ghost_masks": st.masks is not None, "joint_fit": st.joint,
            "needs": None if shown else "joint_fit" if not st.joint else "refit", "images": {"data": _b64(image)}}
     if shown and st.joint and fiber != DESI:
-        model = render(st, fiber, image, shown["params"], shown["noll"], ghost)
+        model = render(st, fiber, image, shown["params"], shown["noll"], weights)
         residual = model - image
         out["images"].update(model=_b64(model), residual=_b64(residual),
                              **components(st, fiber, image.shape[0], shown["params"], shown["noll"]))
-        out["residual_frac"] = residual_frac(residual, image, st.weights(fiber, image.shape, ghost),
-                                             shown["source"].startswith("joint fit"))
+        out["residual_frac"] = residual_frac(residual, image, weights, shown["source"].startswith("joint fit"))
         out["pupil_scale"] = load_pupil_scale(st.rundir, fiber)
         out["absolute_center"] = [meta["mom_center_x"] + shown["params"][1], meta["mom_center_y"] + shown["params"][2]]
     return out
@@ -295,18 +302,65 @@ def residual_frac(residual, image, weights, joint: bool) -> float:
     return float(np.abs(residual * weights).max() / image.max())
 
 
-def render(st: RunState, fiber: str, image: np.ndarray, params, noll, ghost: str) -> np.ndarray:
+def render(st: RunState, fiber: str, image: np.ndarray, params, noll, weights) -> np.ndarray:
     """Model image of a spot from its parameters and the joint fit, amplitude and background solved as in the fit."""
     return fit.render_model_shared(
         list(params), image, st.theta, load_pupil_scale(st.rundir, fiber), model=st.model, supersample=st.supersample,
         psf_oversample=st.psf_oversample, engine=st.engine, fnum=st.fnum, zernike_noll=tuple(int(j) for j in noll),
-        weights=st.weights(fiber, image.shape, ghost))
+        weights=weights)
+
+
+def _ghost_box_at(xy, fnum, **extra) -> dict:
+    side = box_side(fnum)
+    x0, y0 = box_corner(xy, side)
+    return {"x0": x0, "y0": y0, "side": side, "gx": float(xy[0]), "gy": float(xy[1]), **extra}
+
+
+def fiber_ghost(st: RunState, fiber: str, shape, n_spots: int = 9) -> dict | None:
+    """The fiber's ghost box as GhostMaskAnalysis finds it for a run, on up to `n_spots` of the fiber's unmasked saved
+    fits (train spots first, spread over the sweep): detect_ghost on each residual, the median centre of the detections.
+    None when the fiber has no unmasked saved fit, or no residual shows a ghost. The ghost sits at a fixed pixel, so the
+    box applies to every spot of the fiber (on a hold frame the most negative residual is often something else)."""
+    key = (fiber, tuple(shape))
+    if key not in st.fiber_ghosts:
+        candidates = [img for img, fits in st.fits.items() if img in st.df.index and st.df.loc[img, "fiber"] == fiber
+                      and st.image(img).shape == tuple(shape) and any(f["ghost"] == "off" for f in fits)]
+        candidates.sort(key=lambda img: (st.df.loc[img, "routine"] not in ("train", "train2"), img))
+        train = [img for img in candidates if st.df.loc[img, "routine"] in ("train", "train2")] or candidates
+        picked = [train[i] for i in np.unique(np.linspace(0, len(train) - 1, min(n_spots, len(train))).round().astype(int))] if train else []
+        centres = []
+        for img in picked:
+            unmasked = next(f for f in st.fits[img] if f["ghost"] == "off")
+            image = st.image(img)
+            found = detect_ghost(render(st, fiber, image, unmasked["params"], unmasked["noll"], None) - image)["xy"]
+            if found is not None:
+                centres.append(found)
+        st.fiber_ghosts[key] = (_ghost_box_at(np.median(centres, axis=0), st.fnum, found_on=f"{len(centres)} of {len(picked)} spots of {fiber}")
+                                if centres else None)
+    return st.fiber_ghosts[key]
+
+
+def _fit_spot(st: RunState, fiber: str, image, noll, r_fixed, seeds, weights, map_function) -> dict:
+    """The lowest-cost fit of `image` over the seeds [r, x0, y0, c4, *cJ] (r dropped when fixed), theta and the pupil
+    scale held at the joint fit's."""
+    seeds = [s[1:] for s in seeds] if r_fixed is not None else seeds
+    unique = [list(s) for s in dict.fromkeys(tuple(s) for s in seeds)]
+    scale = load_pupil_scale(st.rundir, fiber)
+    tasks = [(image, st.theta, scale, r_fixed, None, p0, st.model, st.supersample, st.psf_oversample, st.engine, st.fnum,
+              noll, weights) for p0 in unique]
+    best = fit.fit_summary(min(map_function(_fit_candidate, tasks), key=lambda res: res.cost), image, weights)
+    x = [float(v) for v in best["x"]]
+    return {"noll": list(noll), "params": [r_fixed, *x] if r_fixed is not None else x, "cost": best["cost"],
+            "residual_frac": best["residual_frac"], "r_fixed": r_fixed is not None, "n_seeds": len(unique)}
 
 
 def refit(path: Path, img: str, ghost: str, folder: Path, map_function=map) -> dict:
     """Fits one spot with the joint fit's theta and pupil scale (r fixed at the series' value for hold frames when
-    fit.fix_r), from its saved fits (else the nearest fit of its fiber) and a generic seed (spread over `map_function`, e.g. a process pool's map), and caches
-    the result in `folder`."""
+    fit.fix_r), from its saved fits (else the nearest fit of its fiber) and a generic seed, spread over `map_function`
+    (e.g. a process pool's map); caches the result in `folder`.
+
+    ghost "on" without a mask of the run for the fiber hunts the ghost as GhostMaskAnalysis does (fiber_ghost; on this
+    spot alone when the fiber has no unmasked saved fit), then fits with weight 0 on the box round(32 / fnum) px."""
     st = state(path)
     row = st.df.loc[img]
     fiber, routine = str(row["fiber"]), str(row["routine"])
@@ -317,18 +371,26 @@ def refit(path: Path, img: str, ghost: str, folder: Path, map_function=map) -> d
     r_fixed = float(series["r_fixed"][0]) if series is not None and st.fix_r and "r_fixed" in series else None
     seeds = [_seed_from(f["params"], noll) for f in st.fits.get(img, [])] or [_nearest_seed(st, fiber, row, noll)]
     seeds.append([1.0, 0.0, 0.0, seeds[0][3]] + [0.0] * (len(noll) - 1))     # generic seed, as the per-frame fits
-    if r_fixed is not None:
-        seeds = [s[1:] for s in seeds]
-    weights = st.weights(fiber, image.shape, ghost)
-    scale = load_pupil_scale(st.rundir, fiber)
-    unique = [list(s) for s in dict.fromkeys(tuple(s) for s in seeds)]
-    tasks = [(image, st.theta, scale, r_fixed, None, p0, st.model, st.supersample, st.psf_oversample, st.engine, st.fnum,
-              noll, weights) for p0 in unique]
-    best = fit.fit_summary(min(map_function(_fit_candidate, tasks), key=lambda res: res.cost), image, weights)
-    x = [float(v) for v in best["x"]]
-    params = [r_fixed, *x] if r_fixed is not None else x
-    out = {"ghost": ghost, "noll": list(noll), "params": params, "cost": best["cost"], "residual_frac": best["residual_frac"],
-           "r_fixed": r_fixed is not None, "n_seeds": len(unique), "stamp": st.stamp()}
+    run_box = st.ghost_box(fiber, image.shape)
+    if ghost == "off" or run_box is not None:
+        box = run_box if ghost == "on" else None
+        out = _fit_spot(st, fiber, image, noll, r_fixed, seeds, box_weights(image.shape, box), map_function)
+    else:
+        box = fiber_ghost(st, fiber, image.shape)
+        unmasked = None
+        if box is None:       # no unmasked saved fit of the fiber: look on this spot alone
+            unmasked = (next((f for f in st.fits.get(img, []) if f["ghost"] == "off"), None)
+                        or load_viewer_fit(folder, img, "off", st) or refit(path, img, "off", folder, map_function))
+            found = detect_ghost(render(st, fiber, image, unmasked["params"], unmasked["noll"], None) - image)["xy"]
+            box = None if found is None else _ghost_box_at(found, st.fnum, found_on="this spot")
+        if box is None:
+            out = {k: unmasked[k] for k in ("noll", "params", "cost", "residual_frac", "r_fixed", "n_seeds") if k in unmasked}
+            out.update(ghost_found=False, ghost_box=None)
+        else:
+            extra = [_seed_from(unmasked["params"], noll)] if unmasked else []
+            out = _fit_spot(st, fiber, image, noll, r_fixed, [*extra, *seeds], box_weights(image.shape, box), map_function)
+            out.update(ghost_found=True, ghost_box=box)
+    out = {"ghost": ghost, **out, "stamp": st.stamp()}
     folder.mkdir(parents=True, exist_ok=True)
     viewer_fit_path(folder, img, ghost).write_text(json.dumps(out))
     return out
@@ -346,9 +408,10 @@ def _seed_from(params, noll) -> list[float]:
 
 
 def _nearest_seed(st: RunState, fiber: str, row, noll) -> list[float]:
-    """The saved fit of the same fiber nearest in stage position (and time), for a spot never fitted."""
-    candidates = [(abs(int(st.df.loc[i, "x_position"]) - int(row["x_position"])), i) for i in st.fits
-                  if i in st.df.index and st.df.loc[i, "fiber"] == fiber]
+    """The saved fit of the same fiber nearest in stage position (any, without positions), for a spot never fitted."""
+    def distance(i):
+        return abs(int(st.df.loc[i, "x_position"]) - int(row["x_position"])) if "x_position" in st.df.columns else 0
+    candidates = [(distance(i), i) for i in st.fits if i in st.df.index and st.df.loc[i, "fiber"] == fiber]
     if not candidates:
         return [1.0, 0.0, 0.0, 0.0] + [0.0] * (len(noll) - 1)
     return _seed_from(st.fits[min(candidates)[1]][0]["params"], noll)

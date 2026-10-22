@@ -212,13 +212,22 @@ async function refit(detail, mine) {
   }
 }
 
+function ghostNote(detail) {
+  if (detail.ghost !== 'on') return null;
+  if (detail.ghost_found === false) return h('span', { class: 'badge warn' }, 'no ghost found: unmasked fit shown');
+  if (detail.ghost_box_source === 'spot') return h('span', { class: 'muted' }, `ghost box found by the viewer on ${detail.ghost_box.found_on}`);
+  if (detail.ghost_box_source === 'run') return h('span', { class: 'muted' }, 'ghost box of the run\'s masks');
+  return null;
+}
+
 function fitBanner(detail) {
   if (detail.needs === 'joint_fit') {
     return h('div', { class: 'banner warn' }, 'No joint fit on this run yet: theta and the pupil scales it fits are needed to model any spot. ',
       h('button', { class: 'primary', onclick: () => jointFitModal(table.info, ghostSetting()) }, 'Run the joint fit…'));
   }
   if (detail.needs === 'refit') {
-    return h('div', { class: 'banner' }, h('span', { class: 'spinner' }), ` No saved fit of this spot with the ghost mask ${detail.ghost}: fitting it now with the joint fit's theta and pupil scale (a few seconds).`);
+    const hunt = detail.ghost === 'on' && !detail.ghost_box ? ' The ghost box is found first, from the unmasked fits of this fiber.' : '';
+    return h('div', { class: 'banner' }, h('span', { class: 'spinner' }), ` No saved fit of this spot with the ghost mask ${detail.ghost}: fitting it now with the joint fit's theta and pupil scale (a few seconds).${hunt}`);
   }
   const fit = detail.fit;
   const ghostNote = fit.ghost_inferred ? ' (inferred from log.log)' : '';
@@ -273,7 +282,7 @@ function renderSpot(detail) {
     toolbar.replaceChildren(viewToggles(options, refresh));
     drawViews(detail, views);
   };
-  const ghostSelect = h('select', { disabled: !detail.ghost_masks, title: detail.ghost_masks ? '' : 'this run has no ghost masks (ghost_mask step)' },
+  const ghostSelect = h('select', { title: detail.ghost_masks ? 'the run\'s ghost masks' : 'no ghost masks on this run: the viewer finds the box' },
     h('option', { value: 'on', selected: detail.ghost === 'on' }, 'on'), h('option', { value: 'off', selected: detail.ghost === 'off' }, 'off'));
   ghostSelect.onchange = () => { setGhostSetting(ghostSelect.value); showSpot(detail.img); };
   const pin = () => { addPin({ run: table.run, img: detail.img, label: `${detail.meta.fiber} ${detail.meta.routine} x=${detail.meta.x_position} ${(detail.meta.timestamp || '').slice(11, 19)}` }); toast('Pinned: see the Compare tab'); };
@@ -289,7 +298,7 @@ function renderSpot(detail) {
         window.dispatchEvent(new Event('resize'));
       } }, '⇔ wide')),
     h('div', { class: 'row small', style: 'margin-top:4px' }, 'ghost mask in the fit ', ghostSelect,
-      detail.ghost_masks ? null : h('span', { class: 'muted' }, 'no ghost masks on this run (run the ghost_mask step in Analyses)'),
+      ghostNote(detail),
       detail.residual_frac !== undefined ? h('span', { class: 'muted' }, `residual_frac ${fmt(detail.residual_frac)}`) : null),
     fitBanner(detail),
     foldable('meta', 'Metadata', metadata(detail), false),

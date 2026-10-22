@@ -11,7 +11,7 @@ def test_table_without_fits(rundir):
     assert len(table["rows"]) == 10 and not table["joint_fit"]
     assert all(sources == [] for sources in table["fits"].values())
     detail = spots.detail(rundir, "fa_35000_stability_1.npy", "on")
-    assert detail["needs"] == "joint_fit" and detail["ghost"] == "off"      # no masks: the ghost setting falls back to off
+    assert detail["needs"] == "joint_fit" and detail["ghost"] == "on" and detail["ghost_box"] is None
     assert set(detail["images"]) == {"data"}
 
 
@@ -68,3 +68,20 @@ def test_refit_reproduces_the_series(tmp_path):
     assert out["r_fixed"] and out["params"][0] == pytest.approx(saved["params"][0])
     assert out["params"][3] == pytest.approx(saved["params"][3], abs=1e-3)               # c4
     assert spots.load_viewer_fit(tmp_path, img, saved["ghost"], st) == out
+
+
+BASELINE = REAL_RUN.parent / "20261015-161039_stability-fnum4_A-baseline"
+FNUM4 = REAL_RUN.parent / "20261015-161039_stability-fnum4"
+
+
+@pytest.mark.skipif(not (BASELINE.exists() and (FNUM4 / "results" / "ghost_masks.hdf5").exists()),
+                    reason="needs the fnum4 rundir, its ghost masks and its A-baseline copy")
+def test_fiber_ghost_matches_the_pipeline_masks():
+    """The viewer's ghost hunt on a run without masks lands on the boxes GhostMaskAnalysis found on the same data."""
+    from DefocusTest.postprocessing import GhostMasks
+    st = spots.state(BASELINE)
+    pipeline = GhostMasks.load(spots.state(FNUM4).rundir)
+    for fiber in ("Fa", "Fc", "pos_1"):
+        box = spots.fiber_ghost(st, fiber, (121, 121), n_spots=5)
+        assert abs(box["x0"] - pipeline.box(fiber, (121, 121))[0]) <= 1
+        assert abs(box["y0"] - pipeline.box(fiber, (121, 121))[1]) <= 1
