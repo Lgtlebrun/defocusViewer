@@ -20,6 +20,7 @@ from DefocusTest.devices import DESI
 from DefocusTest.imgDF import load_stack
 from DefocusTest.postprocessing import GhostMasks
 from PIL import Image
+from posUtils.define import UMperCOUNT
 
 from .catalog import _mtime, open_rundir
 
@@ -233,6 +234,7 @@ def detail(path: Path, img: str, ghost: str, viewer_fits: Path | None = None) ->
     meta["fnum"] = st.fnum if st.joint else (st.config.get("fit") or {}).get("fnum")
     meta["device"] = (st.config.get("run") or {}).get("device")
     meta["crop_side"] = int(image.shape[0])
+    meta["stage_counts"] = None if meta.get("x_position") is None else round(meta["x_position"] / UMperCOUNT)
     saved = st.fits.get(img, [])
     chosen = next((f for f in saved if f["ghost"] == ghost), None)
     viewer = load_viewer_fit(viewer_fits, img, ghost, st)

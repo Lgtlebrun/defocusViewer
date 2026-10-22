@@ -244,7 +244,7 @@ function metadata(detail) {
   const m = detail.meta;
   const rows = [
     ['fiber', m.fiber], ['routine', m.routine], ['timestamp', m.timestamp], ['f-number', m.fnum], ['exposure', `${m.texp} us`],
-    ['frames averaged', m.n_frames], ['stage position', `${m.x_position} um`], ['crop centre (sensor px)', `${m.mom_center_x}, ${m.mom_center_y}`],
+    ['frames averaged', m.n_frames], ['stage position', `${m.x_position} um (${m.stage_counts} encoder counts)`], ['crop centre (sensor px)', `${m.mom_center_x}, ${m.mom_center_y}`],
     ['spot centre (sensor px)', detail.absolute_center ? detail.absolute_center.map((v) => v.toFixed(2)).join(', ') : 'needs a fit'],
     ['crop side', `${m.crop_side} px`], ['device', m.device], ['image', detail.img],
     ['pupil scale', detail.pupil_scale !== undefined ? fmt(detail.pupil_scale, 5) : ''],
