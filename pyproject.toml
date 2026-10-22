@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "defocusviewer"
+version = "0.1.0"
+description = "Browser GUI for the Defocus test: rundirs, plots, spots and their fits, analyses, cluster usage"
+requires-python = ">=3.11"
+# DefocusTest, PosUtils and amkit come from the environment (editable installs)
+dependencies = ["fastapi", "uvicorn", "numpy", "pandas", "tables", "pillow", "pyyaml"]
+
+[project.scripts]
+defocusviewer = "defocusviewer.__main__:main"
+
+[tool.setuptools]
+packages = ["defocusviewer"]
+
+[tool.setuptools.package-data]
+defocusviewer = ["static/*", "static/vendor/*"]

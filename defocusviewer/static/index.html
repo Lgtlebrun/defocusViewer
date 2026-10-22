@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>defocusViewer</title>
+<link rel="stylesheet" href="/static/style.css">
+<script src="/static/vendor/plotly-2.35.2.min.js"></script>
+</head>
+<body>
+<header class="top">
+  <span class="brand">defocusViewer</span>
+  <nav id="tabs">
+    <button data-tab="runs">Runs</button>
+    <button data-tab="compare">Compare <span id="pin-count" class="count"></span></button>
+    <button data-tab="jobs">Jobs <span id="job-count" class="count"></span></button>
+    <button data-tab="cluster">Cluster</button>
+  </nav>
+  <span id="cluster-summary" class="muted small"></span>
+  <button id="theme" class="ghost-button" title="light / dark">◐</button>
+</header>
+<main>
+  <section id="tab-runs" class="tab">
+    <aside id="run-list"></aside>
+    <div id="run-view"><p class="muted pad">Pick a run on the left.</p></div>
+  </section>
+  <section id="tab-compare" class="tab"></section>
+  <section id="tab-jobs" class="tab"></section>
+  <section id="tab-cluster" class="tab"></section>
+</main>
+<div id="modal" hidden></div>
+<div id="toast" hidden></div>
+<script type="module" src="/static/app.js"></script>
+</body>
+</html>
