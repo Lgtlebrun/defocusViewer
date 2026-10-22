@@ -448,9 +448,21 @@ def fov_fibers(path: Path) -> dict:
 CALIBRATED = ["dz_free", "dz_pooled", "x_obj_free", "y_obj_free", "x_obj_pooled", "y_obj_pooled"]
 
 
-def fiber_table(path: Path) -> dict:
-    """{columns, rows} with one row per spot: metadata, the main saved fit (r, centre in the crop and on the sensor, c4.., residual
-    and, for hold frames, delta_z), and the calibrated delta_z and object-plane position of the calibration step."""
+_fiber_frames: dict[Path, tuple[tuple, pd.DataFrame]] = {}
+
+
+def fiber_frame(path: Path) -> pd.DataFrame:
+    """One row per spot: metadata, the main saved fit (r, centre in the crop and on the sensor, c4.., residual and, for hold
+    frames, delta_z), and the calibrated delta_z and object-plane position of the calibration step. Rebuilt when the
+    run's results change."""
+    signature = _signature(path)
+    cached = _fiber_frames.get(path)
+    if cached is None or cached[0] != signature:
+        _fiber_frames[path] = (signature, _fiber_frame(path))
+    return _fiber_frames[path][1]
+
+
+def _fiber_frame(path: Path) -> pd.DataFrame:
     st = state(path)
     rows = []
     for img, row in st.df.iterrows():
@@ -471,6 +483,5 @@ def fiber_table(path: Path) -> dict:
         cal = load_labeled_result_df(st.rundir, "calibration_timeseries")
         cal["timestamp"] = pd.to_datetime(cal["timestamp"])
         df = df.merge(cal[["fiber", "timestamp", *[c for c in CALIBRATED if c in cal.columns]]], on=["fiber", "timestamp"], how="left")
-    df["timestamp"] = pd.to_datetime(df["timestamp"]).dt.strftime("%Y-%m-%dT%H:%M:%S.%f").str[:-3]
-    df = df.sort_values(["fiber", "timestamp"])
-    return {"columns": list(df.columns), "rows": df.astype(object).where(df.notna(), None).values.tolist()}
+    df["timestamp"] = pd.to_datetime(df["timestamp"])
+    return df.sort_values(["fiber", "timestamp"]).reset_index(drop=True)

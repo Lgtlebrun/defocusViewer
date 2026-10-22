@@ -23,6 +23,7 @@ from .config import Config
 STATIC = Path(__file__).parent / "static"
 COOKIE = "defocusviewer"
 PARTITIONS = ("express", "standard", "long", "verylong")
+ROUTINE_ORDER = ("train_burnin", "train", "train2", "stability", "detection", "positioner", "train_end")
 DETAIL_CACHE = 32           # spots whose detail is kept in memory (about 0.7 MB each)
 LOGIN_HINT = ("<h3>defocusViewer: not logged in</h3><p>Open the login URL printed by <code>defocusviewer url</code> "
               "on farm-gpu1 (it sets a cookie in this browser).</p>")
@@ -235,9 +236,37 @@ def create_app(config: Config, token: str, background: bool = True) -> FastAPI:
     def run_spots(run: str):
         return spots.table(run_path(run), viewer_fits(run))
 
-    @app.get("/api/run/fibers")
-    def run_fibers(run: str):
-        return spots.fiber_table(run_path(run))
+    @app.get("/api/run/fibers/options")
+    def fiber_options(run: str):
+        table = spots.fiber_frame(run_path(run))
+        quantities = [[q, *figures.FIBER_QUANTITIES[q][:2]] for q in figures.FIBER_QUANTITIES
+                      if q in table.columns and table[q].notna().any()]
+        routines = [r for r in ROUTINE_ORDER if r in set(table["routine"])] + sorted(set(table["routine"]) - set(ROUTINE_ORDER))
+        return {"fibers": sorted(table["fiber"].unique()), "routines": routines, "quantities": quantities,
+                "x_axes": figures.X_AXES, "has_x_position": bool("x_position" in table and table["x_position"].notna().any())}
+
+    @app.get("/api/run/fibers/figure")
+    def fiber_figure(run: str, quantities: str, fibers: str, routines: str, x: str = "time", relative: bool = False,
+                     average: int = 1, errors: bool = False, format: str = "png", dpi: int = 150):
+        path = run_path(run)
+        table = spots.fiber_frame(path)
+        quantities_, fibers_, routines_ = (v.split(",") if v else [] for v in (quantities, fibers, routines))
+        if (any(q not in figures.FIBER_QUANTITIES or q not in table.columns for q in quantities_) or x not in figures.X_AXES
+                or format not in ("png", "pdf", "svg") or not 50 <= dpi <= 600 or not 1 <= average <= 501):
+            raise HTTPException(400, "unknown quantity, x axis, format, or dpi / average out of range")
+        if not quantities_ or not fibers_ or not routines_:
+            raise HTTPException(400, "pick at least one quantity, fiber and routine")
+        image = figures.fiber_figure(table, quantities_, fibers_, routines_, x, relative, average, errors,
+                                     title=path.name, fmt=format, dpi=dpi)
+        media = {"png": "image/png", "pdf": "application/pdf", "svg": "image/svg+xml"}[format]
+        headers = {} if format == "png" and dpi <= 200 else {"Content-Disposition": f'attachment; filename="{path.name}_fibers.{format}"'}
+        return Response(image, media_type=media, headers=headers)
+
+    @app.get("/api/run/fibers.csv")
+    def fiber_csv(run: str):
+        path = run_path(run)
+        return Response(spots.fiber_frame(path).to_csv(index=False), media_type="text/csv",
+                        headers={"Content-Disposition": f'attachment; filename="{path.name}_fit_results.csv"'})
 
     @app.get("/api/run/fov")
     def run_fov(run: str):

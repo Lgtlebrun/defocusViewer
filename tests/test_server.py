@@ -61,3 +61,17 @@ def test_info_has_a_readable_summary(client):
     assert titles[:2] == ["Run", "Routines"]
     run = dict(info["summary"][0]["rows"])
     assert run["type of test"].startswith("stability") and run["fibers"] == "2: Fa, Fb"
+
+
+def test_fiber_figure_drawn_by_matplotlib(client):
+    client.cookies.set(COOKIE, "secret")
+    options = client.get("/api/run/fibers/options", params={"run": RUN}).json()
+    assert options["fibers"] == ["Fa", "Fb"] and options["routines"] == ["train", "stability"]
+    assert [q[0] for q in options["quantities"]] == ["texp"]       # no fit yet: only the metadata
+    query = {"run": RUN, "quantities": "texp", "fibers": "Fa,Fb", "routines": "train,stability", "x": "x_position"}
+    png = client.get("/api/run/fibers/figure", params=query)
+    assert png.status_code == 200 and png.content[:4] == b"\x89PNG"
+    pdf = client.get("/api/run/fibers/figure", params={**query, "format": "pdf", "dpi": 400})
+    assert pdf.content[:4] == b"%PDF" and "attachment" in pdf.headers["content-disposition"]
+    assert client.get("/api/run/fibers/figure", params={**query, "quantities": "nope"}).status_code == 400
+    assert client.get("/api/run/fibers.csv", params={"run": RUN}).text.startswith("img,fiber,routine")
