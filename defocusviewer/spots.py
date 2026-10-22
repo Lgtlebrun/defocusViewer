@@ -443,3 +443,34 @@ def fov_fibers(path: Path) -> dict:
     centres = st.df.groupby("fiber")[["mom_center_x", "mom_center_y"]].median()
     return {"shape": shape, "fibers": [{"fiber": f, "x": float(r["mom_center_x"]), "y": float(r["mom_center_y"])}
                                        for f, r in centres.iterrows()]}
+
+
+CALIBRATED = ["dz_free", "dz_pooled", "x_obj_free", "y_obj_free", "x_obj_pooled", "y_obj_pooled"]
+
+
+def fiber_table(path: Path) -> dict:
+    """{columns, rows} with one row per spot: metadata, the main saved fit (r, centre in the crop and on the sensor, c4.., residual
+    and, for hold frames, delta_z), and the calibrated delta_z and object-plane position of the calibration step."""
+    st = state(path)
+    rows = []
+    for img, row in st.df.iterrows():
+        record = {"img": img, "fiber": row["fiber"], "routine": row["routine"], "timestamp": row["timestamp"],
+                  "x_position": row.get("x_position"), "texp": row.get("texp")}
+        fits = st.fits.get(img)
+        if fits:
+            main = fits[0]
+            record.update(source=main["source"], ghost=main["ghost"], r=main["params"][0], x0=main["params"][1],
+                          y0=main["params"][2], c4=main["params"][3], residual_frac=main.get("residual_frac"),
+                          cx=row["mom_center_x"] + main["params"][1], cy=row["mom_center_y"] + main["params"][2],
+                          **{f"c{j}": v for j, v in zip(main["noll"][1:], main["params"][4:])},
+                          **{k: main[k] for k in ("delta_z", "sigma_delta_z", "sigma_c4") if k in main})
+        rows.append(record)
+    df = pd.DataFrame(rows)
+    calibration = path / "results" / "calibration_timeseries.hdf5"
+    if calibration.exists() and len(df):
+        cal = load_labeled_result_df(st.rundir, "calibration_timeseries")
+        cal["timestamp"] = pd.to_datetime(cal["timestamp"])
+        df = df.merge(cal[["fiber", "timestamp", *[c for c in CALIBRATED if c in cal.columns]]], on=["fiber", "timestamp"], how="left")
+    df["timestamp"] = pd.to_datetime(df["timestamp"]).dt.strftime("%Y-%m-%dT%H:%M:%S.%f").str[:-3]
+    df = df.sort_values(["fiber", "timestamp"])
+    return {"columns": list(df.columns), "rows": df.astype(object).where(df.notna(), None).values.tolist()}

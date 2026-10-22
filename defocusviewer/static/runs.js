@@ -1,10 +1,11 @@
 // The Runs tab: the run list (local and pos-control), the run header and its subtabs.
 import { h, api, post, q, toast, getHash, setHash, ago } from './ui.js';
 import { renderSpots } from './spots.js';
+import { renderFibers } from './fibers.js';
 import { renderPlots } from './plots.js';
 import { renderAnalyses } from './analyses.js';
 
-const SUBTABS = { spots: 'Spots', plots: 'Plots', analyses: 'Analyses', info: 'Info' };
+const SUBTABS = { spots: 'Spots', fibers: 'Fibers', plots: 'Plots', analyses: 'Analyses', info: 'Info' };
 const DEVICE_ORDER = ['Orbray6', 'MPS6', 'calibration_stand'];
 let runs = [];
 let listState = { search: '', remote: true, updated: null, error: null };
@@ -118,7 +119,7 @@ export function showRunFromHash() {
     shown = { run, sub: subtab };
     const body = h('div', { class: 'run-body' });
     view.replaceChildren(runHeader(info, subtab), body);
-    ({ spots: renderSpots, plots: renderPlots, analyses: renderAnalyses, info: renderInfo })[subtab](body, info);
+    ({ spots: renderSpots, fibers: renderFibers, plots: renderPlots, analyses: renderAnalyses, info: renderInfo })[subtab](body, info);
   } else if (subtab === 'spots') {
     renderSpots(null, info);      // only the spot of the hash changed
   }

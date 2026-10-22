@@ -195,6 +195,10 @@ def create_app(config: Config, token: str, background: bool = True) -> FastAPI:
     def run_spots(run: str):
         return spots.table(run_path(run), viewer_fits(run))
 
+    @app.get("/api/run/fibers")
+    def run_fibers(run: str):
+        return spots.fiber_table(run_path(run))
+
     @app.get("/api/run/fov")
     def run_fov(run: str):
         return spots.fov_fibers(run_path(run))
