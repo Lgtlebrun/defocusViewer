@@ -43,3 +43,12 @@ def test_job_requests_validated(client, config):
         checked_resources(config, {"mode": "slurm", "cpus": 4, "partition": "standard", "mem_per_cpu": "1G; rm"})
     ok = checked_resources(config, {"mode": "slurm", "cpus": 4, "partition": "express", "mem_per_cpu": "2000M", "time": "1:00:00"})
     assert ok["cpus"] == 4
+
+
+def test_pinned_runs_kept_on_the_server(client, config):
+    client.cookies.set(COOKIE, "secret")
+    assert client.get("/api/pinned").json() == []
+    assert client.post("/api/pinned", json={"run": RUN, "pinned": True}).json() == [RUN]
+    assert client.post("/api/pinned", json={"run": RUN, "pinned": True}).json() == [RUN]      # once
+    assert (config.state_dir / "pinned_runs.json").exists()
+    assert client.post("/api/pinned", json={"run": RUN, "pinned": False}).json() == []

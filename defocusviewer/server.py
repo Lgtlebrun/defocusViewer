@@ -1,6 +1,7 @@
 """HTTP API and page of the viewer. Every request but /login needs the login cookie (the secret of config.token)."""
 import asyncio
 import hmac
+import json
 import multiprocessing
 import os
 import re
@@ -49,6 +50,11 @@ class JointFitRequest(BaseModel):
     pupil_shape: str = "hexagon"
     resources: dict = {}
     force: bool = False
+
+
+class PinRequest(BaseModel):
+    run: str
+    pinned: bool
 
 
 class FetchRequest(BaseModel):
@@ -152,6 +158,24 @@ def create_app(config: Config, token: str, background: bool = True) -> FastAPI:
     @app.get("/api/runs")
     def runs():
         return catalog.run_list(config, remote)
+
+    pins_file = config.state_dir / "pinned_runs.json"
+
+    def pinned_runs() -> list[str]:
+        return json.loads(pins_file.read_text()) if pins_file.exists() else []
+
+    @app.get("/api/pinned")
+    def get_pinned():
+        return pinned_runs()
+
+    @app.post("/api/pinned")
+    def set_pinned(request: PinRequest):
+        runs = [r for r in pinned_runs() if r != request.run] + ([request.run] if request.pinned else [])
+        pins_file.parent.mkdir(parents=True, exist_ok=True)
+        tmp = pins_file.with_suffix(".tmp")
+        tmp.write_text(json.dumps(runs))
+        tmp.replace(pins_file)
+        return runs
 
     @app.post("/api/remote/refresh")
     def refresh_remote():

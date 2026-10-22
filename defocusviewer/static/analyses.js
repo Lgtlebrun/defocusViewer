@@ -24,10 +24,11 @@ export function resourcesEditor(defaults, freeGpus, cpuDefaults) {
   const config = window.viewerConfig;
   const gpuDefaults = defaults.mode === 'gpu' ? defaults : { n_gpus: 2, gpu_hosts: config.job_gpu_hosts, cpu_workers: 4, launch_host: config.launch_hosts[0] };
   const slurmDefaults = defaults.mode === 'slurm' ? defaults : cpuDefaults;
-  const mode = { value: defaults.mode };
+  const mode = { value: defaults.mode, chosen: false };      // chosen: the user picked it, the step boxes no longer change it
+  const group = `mode-${Math.random().toString(36).slice(2)}`;   // one radio group per editor
   const radio = (value, label) => {
-    const input = h('input', { type: 'radio', name: `mode-${Math.random()}`, checked: mode.value === value });
-    input.onchange = () => { mode.value = value; update(); };
+    const input = h('input', { type: 'radio', name: group, value, checked: mode.value === value });
+    input.onchange = () => { mode.value = value; mode.chosen = true; update(); };
     return h('label', {}, input, ' ', label);
   };
   const nGpus = h('input', { type: 'number', min: 1, max: 8, value: gpuDefaults.n_gpus });
@@ -64,7 +65,13 @@ export function resourcesEditor(defaults, freeGpus, cpuDefaults) {
     h('div', { class: 'row' }, radio('gpu', 'GPUs'), radio('slurm', 'Slurm CPU job')), gpuSet, slurmSet);
   for (const input of [nGpus, workers, launchHost, cpus, partition, memory, time, ...hostBoxes.map((l) => l.querySelector('input'))]) input.addEventListener('change', update);
   update();
-  return { el, value, setMode: (m) => { mode.value = m; el.querySelectorAll('input[type=radio]')[m === 'gpu' ? 0 : 1].checked = true; update(); } };
+  const setMode = (m) => {
+    if (mode.chosen) return;
+    mode.value = m;
+    for (const input of el.querySelectorAll('input[type=radio]')) input.checked = input.value === m;
+    update();
+  };
+  return { el, value, setMode };
 }
 
 export async function launch(request, onDone) {

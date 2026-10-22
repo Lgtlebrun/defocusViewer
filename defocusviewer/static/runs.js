@@ -8,6 +8,7 @@ import { renderAnalyses } from './analyses.js';
 const SUBTABS = { spots: 'Spots', fibers: 'Fibers', plots: 'Plots', analyses: 'Analyses', info: 'Info' };
 const DEVICE_ORDER = ['Orbray6', 'MPS6', 'calibration_stand'];
 let runs = [];
+let pinned = new Set();
 let listState = { search: '', remote: true, updated: null, error: null };
 let shown = { run: null, sub: null };
 
@@ -19,7 +20,8 @@ export async function initRuns() {
 }
 
 export async function loadRuns() {
-  const data = await api('/api/runs');
+  const [data, pins] = await Promise.all([api('/api/runs'), api('/api/pinned')]);
+  pinned = new Set(pins);
   runs = data.runs;
   listState.updated = data.remote_updated;
   listState.error = data.remote_error;
@@ -66,19 +68,31 @@ function renderList() {
     (groups[run.group] ||= []).push(run);
   }
   const selected = getHash().run;
+  const runItem = (run) => {
+    const { date, slug } = prettyName(run.name);
+    const star = h('button', { class: 'star', title: pinned.has(run.key) ? 'unpin' : 'pin on top of the list', onclick: async (e) => {
+      e.stopPropagation();
+      pinned = new Set(await post('/api/pinned', { run: run.key, pinned: !pinned.has(run.key) }));
+      renderList();
+    } }, pinned.has(run.key) ? '★' : '☆');
+    return h('div', {
+      class: `run-item${run.local ? '' : ' remote'}${run.key === selected ? ' selected' : ''}`, title: run.key,
+      onclick: () => { setHash({ run: run.key, sub: null, img: null, tab: null }); showRunFromHash(); renderList(); },
+    }, h('div', { class: 'row', style: 'gap:4px;flex-wrap:nowrap;align-items:flex-start' },
+      h('span', { class: 'name', style: 'flex:1' }, h('span', { class: 'muted' }, date), ' ', slug), star),
+    h('div', { class: 'badges' }, badges(run)));
+  };
+  const pinnedRuns = runs.filter((r) => pinned.has(r.key) && (!search || r.name.toLowerCase().includes(search)));
+  const pinnedGroup = pinnedRuns.length ? h('details', { class: 'group', open: true },
+    h('summary', {}, '★ Pinned ', h('span', { class: 'muted small' }, `${pinnedRuns.length}`)),
+    pinnedRuns.sort((a, b) => b.name.localeCompare(a.name)).map(runItem)) : null;
   const children = Object.keys(groups).sort((a, b) => groupOrder(a) - groupOrder(b) || a.localeCompare(b)).map((group) => {
     const items = groups[group].sort((a, b) => b.name.localeCompare(a.name));
     const nLocal = items.filter((r) => r.local).length;
     const isOpen = opened[group] ?? (nLocal > 0);
     const details = h('details', { class: 'group', open: isOpen },
       h('summary', {}, `${group} `, h('span', { class: 'muted small' }, `${nLocal} local, ${items.length - nLocal} on rig`)),
-      items.map((run) => {
-        const { date, slug } = prettyName(run.name);
-        return h('div', {
-          class: `run-item${run.local ? '' : ' remote'}${run.key === selected ? ' selected' : ''}`, title: run.key,
-          onclick: () => { setHash({ run: run.key, sub: null, img: null, tab: null }); showRunFromHash(); renderList(); },
-        }, h('span', { class: 'name' }, h('span', { class: 'muted' }, date), ' ', slug), h('div', { class: 'badges' }, badges(run)));
-      }));
+      items.map(runItem));
     details.addEventListener('toggle', () => {
       const state = openGroups();
       state[group] = details.open;
@@ -97,7 +111,7 @@ function renderList() {
       h('label', {}, remoteToggle, ' runs on pos-control'), h('span', { class: 'spacer' }), refresh),
     h('div', { class: 'small muted', style: 'margin-bottom:6px' },
       listState.error ? `pos-control: ${listState.error}` : `pos-control listed ${ago(listState.updated)}`),
-    ...children);
+    pinnedGroup, ...children);
 }
 
 export function showRunFromHash() {
