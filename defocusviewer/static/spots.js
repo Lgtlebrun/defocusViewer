@@ -1,9 +1,10 @@
 // The Spots subtab: full field of view, filters, timeline and table of the spots on the left, one spot (metadata,
 // fit, images) on the right.
 import { h, api, post, q, toast, fmt, getHash, setHash, cssVar } from './ui.js';
-import { VIEWS, loadOptions, arrays, viewValues, range, heatmap, zoomGroup, viewToggles } from './views.js';
+import { QUANTITIES, loadOptions, arrays, panelValues, columnLabel, panelLabel, range, heatmap, zoomGroup, zoomKey, viewToggles } from './views.js';
 import { addPin } from './compare.js';
 import { jointFitModal } from './analyses.js';
+import { attachMenu } from './menu.js';
 
 export const ROUTINE_ORDER = ['train_burnin', 'train', 'train2', 'stability', 'detection', 'positioner', 'train_end'];
 const SERIES_COLORS = ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300', '#6250d6', '#e34948'];
@@ -43,7 +44,9 @@ export async function renderSpots(body, info) {
     }
     els.left = h('div', { class: 'spots-left' });
     els.right = h('div', { class: 'spots-right' });
-    body.replaceChildren(h('div', { class: 'spots' }, els.left, els.right));
+    let wide = false;
+    try { wide = localStorage.getItem('spotsWide') === 'true'; } catch { /* storage blocked */ }
+    body.replaceChildren(h('div', { class: `spots${wide ? ' wide' : ''}` }, els.left, els.right));
     renderLeft();
   }
   const img = getHash().img;
@@ -263,7 +266,13 @@ function foldable(key, title, content, openByDefault) {
 }
 
 function renderSpot(detail) {
-  const views = h('div', { class: 'views' });
+  Object.assign(options, loadOptions());      // the Compare tab may have changed them
+  const views = h('div', { class: 'views-matrix' });
+  const toolbar = h('div', { class: 'card', style: 'margin-top:6px;padding:6px 10px' });
+  const refresh = () => {
+    toolbar.replaceChildren(viewToggles(options, refresh));
+    drawViews(detail, views);
+  };
   const ghostSelect = h('select', { disabled: !detail.ghost_masks, title: detail.ghost_masks ? '' : 'this run has no ghost masks (ghost_mask step)' },
     h('option', { value: 'on', selected: detail.ghost === 'on' }, 'on'), h('option', { value: 'off', selected: detail.ghost === 'off' }, 'off'));
   ghostSelect.onchange = () => { setGhostSetting(ghostSelect.value); showSpot(detail.img); };
@@ -273,30 +282,48 @@ function renderSpot(detail) {
   els.right.replaceChildren(
     h('div', { class: 'viewer-head' }, h('h3', {}, detail.img), h('span', { class: 'spacer' }),
       h('button', { onclick: () => step(-1), title: 'previous (↑)' }, '◀'), h('button', { onclick: () => step(1), title: 'next (↓)' }, '▶'),
-      h('button', { onclick: pin }, 'Pin to compare'), refitButton),
+      h('button', { onclick: pin }, 'Pin to compare'), refitButton,
+      h('button', { title: 'hide / show the spot list, to give the images the whole width', onclick: () => {
+        const wide = els.body.querySelector('.spots').classList.toggle('wide');
+        try { localStorage.setItem('spotsWide', wide); } catch { /* storage blocked */ }
+        window.dispatchEvent(new Event('resize'));
+      } }, '⇔ wide')),
     h('div', { class: 'row small', style: 'margin-top:4px' }, 'ghost mask in the fit ', ghostSelect,
       detail.ghost_masks ? null : h('span', { class: 'muted' }, 'no ghost masks on this run (run the ghost_mask step in Analyses)'),
       detail.residual_frac !== undefined ? h('span', { class: 'muted' }, `residual_frac ${fmt(detail.residual_frac)}`) : null),
     fitBanner(detail),
     foldable('meta', 'Metadata', metadata(detail), false),
     foldable('fit', 'Fit parameters', paramTable(detail), true),
-    h('div', { class: 'card', style: 'margin-top:6px;padding:6px 10px' }, viewToggles(options, () => drawViews(detail, views))),
+    toolbar,
     views);
-  drawViews(detail, views);
+  refresh();
 }
 
 function drawViews(detail, container) {
+  // rows: the quantities ticked, columns: the representations; a cell is empty when the spot lacks that image
   const images = arrays(detail);
   const group = zoomGroup();
-  group.enabled = options.syncZoom;
   const drawn = [];
-  for (const view of VIEWS.filter((v) => options.views.includes(v.key))) {
-    const values = viewValues(view, images, options, detail.ghost_box);
-    if (values) drawn.push({ view, values, div: h('div', { class: 'plot' }) });
-  }
-  container.replaceChildren(...drawn.map(({ view, div }) => h('div', { class: 'panel' }, h('div', { class: 'title' }, view.label), div)));
-  if (!drawn.length) container.append(h('p', { class: 'muted' }, detail.needs ? 'Only the data until the spot is fitted.' : 'Tick a view above.'));
-  for (const { view, values, div } of drawn) {
-    heatmap(div, view, values, range(values.values, values.diverging), detail.ghost_box, options).then(() => group.add(div, view.domain));
+  const columns = `110px repeat(${options.columns.length}, minmax(220px, 1fr))`;
+  const header = h('div', { class: 'matrix', style: `grid-template-columns:${columns}` }, h('div'),
+    options.columns.map((c) => h('div', { class: 'small muted' }, columnLabel(c))));
+  const rows = options.rows.map((q, i) => h('div', { class: 'matrix', style: `grid-template-columns:${columns}` },
+    h('div', { class: 'small', style: 'align-self:center' }, h('b', {}, QUANTITIES[q].label)),
+    options.columns.map((column, j) => {
+      const panel = { q, ...column };
+      const values = panelValues(panel, images, options, detail.ghost_box);
+      if (!values) return h('div', { class: 'panel muted small' }, detail.needs ? 'needs a fit' : 'n/a');
+      const div = h('div', { class: 'plot' });
+      drawn.push({ panel, values, div, key: zoomKey(options, panel, i, j) });
+      return h('div', { class: 'panel' }, div);
+    })));
+  container.replaceChildren(header, ...rows);
+  if (!options.rows.length || !options.columns.length) container.append(h('p', { class: 'muted' }, 'Tick a row and add a column above.'));
+  const stem = `${table.run.split('/').pop()}_${detail.img.replace(/\.npy$/, '')}`;
+  for (const { panel, values, div, key } of drawn) {
+    const zrange = range(values.values, values.signed);
+    heatmap(div, panel, values, zrange, detail.ghost_box, options).then(() => group.add(div, key));
+    attachMenu(div, { panel, values, zrange, ghostBox: detail.ghost_box, options, title: `${stem}: ${panelLabel(panel)}`,
+      name: `${stem}_${panel.q}_${panel.space}_${panel.scale}${panel.scale === 'power' ? panel.p : ''}` });
   }
 }

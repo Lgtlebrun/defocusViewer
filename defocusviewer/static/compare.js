@@ -1,6 +1,7 @@
 // The Compare tab: pinned spots (from any run, kept in this browser) side by side, same views, shared zoom.
 import { h, api, post, q, toast, fmt } from './ui.js';
-import { VIEWS, loadOptions, arrays, viewValues, range, heatmap, zoomGroup, viewToggles, saveOptions } from './views.js';
+import { attachMenu } from './menu.js';
+import { loadOptions, arrays, cells, panelValues, panelLabel, range, heatmap, zoomGroup, zoomKey, viewToggles, saveOptions } from './views.js';
 
 export function pins() {
   try { return JSON.parse(localStorage.getItem('pins') || '[]'); } catch { return []; }
@@ -41,6 +42,7 @@ export async function renderCompare() {
     box.onchange = () => { options[key] = box.checked; saveOptions(options); draw(); };
     return h('label', { title }, box, ' ', label);
   };
+  const toolbar = h('div', { style: 'margin-top:6px' });
   const ghostSelect = h('select', {}, ['on', 'off'].map((g) => h('option', { value: g, selected: g === ghost }, `ghost mask ${g}`)));
   ghostSelect.onchange = () => { try { localStorage.setItem('ghost', ghostSelect.value); } catch { /* blocked */ } renderCompare(); };
   root.replaceChildren(
@@ -48,24 +50,25 @@ export async function renderCompare() {
       flag('sharedRange', 'same colour range on every row'),
       flag('diffFirst', 'data/model: minus the first row (scaled to the same flux)', 'shows how each spot differs from the first'),
       h('span', { class: 'spacer' }), h('button', { onclick: () => { savePins([]); renderCompare(); } }, 'Unpin all')),
-      h('div', { style: 'margin-top:6px' }, viewToggles(options, () => draw()))),
+      toolbar),
     grid);
+  const refresh = () => { toolbar.replaceChildren(viewToggles(options, refresh)); draw(); };
   const details = await Promise.all(list.map((pin) => load(pin, ghost).catch((e) => ({ error: e.message }))));
 
   function draw() {
-    const views = VIEWS.filter((v) => options.views.includes(v.key));
+    // rows: the pinned spots, columns: every (quantity, representation) cell of the spot panel's matrix
+    const panels = cells(options);
     const reference = details[0]?.images ? arrays(details[0]) : null;
-    const values = details.map((d) => (d.images ? views.map((v) => viewValues(v, arrays(d), options, d.ghost_box, d === details[0] ? null : reference)) : []));
-    const shared = views.map((_, j) => {
+    const values = details.map((d) => (d.images ? panels.map((panel) => panelValues(panel, arrays(d), options, d.ghost_box, reference)) : []));
+    const shared = panels.map((_, j) => {
       const all = values.map((row) => row[j]).filter(Boolean);
       if (!all.length) return null;
-      const ranges = all.map((v) => range(v.values, v.diverging));
+      const ranges = all.map((v) => range(v.values, v.signed));
       return [Math.min(...ranges.map((r) => r[0])), Math.max(...ranges.map((r) => r[1]))];
     });
     const group = zoomGroup();
-    group.enabled = options.syncZoom;
-    const columns = `200px repeat(${views.length}, minmax(240px, 1fr))`;
-    const header = h('div', { style: `display:grid;grid-template-columns:${columns};gap:6px` }, h('div'), views.map((v) => h('div', { class: 'small muted' }, v.label)));
+    const columns = `200px repeat(${panels.length}, minmax(220px, 1fr))`;
+    const header = h('div', { style: `display:grid;grid-template-columns:${columns};gap:6px` }, h('div'), panels.map((p) => h('div', { class: 'small muted' }, panelLabel(p))));
     const toDraw = [];
     const rows = details.map((d, i) => {
       const pin = list[i];
@@ -74,18 +77,22 @@ export async function renderCompare() {
         h('div', { class: 'mono' }, pin.img),
         d.error ? h('div', { class: 'state-failed' }, d.error) : h('div', { class: 'muted' }, d.fit ? `${d.fit.source}, residual_frac ${fmt(d.residual_frac, 3)}` : 'no fit'),
         h('a', { href: `#${new URLSearchParams({ run: pin.run, img: pin.img })}` }, 'open'), ' ', remove);
-      const cells = views.map((view, j) => {
+      const cellsOfRow = panels.map((panel, j) => {
         const v = values[i][j];
         if (!v) return h('div', { class: 'panel muted small' }, 'n/a');
         const div = h('div', { class: 'plot', style: 'height:250px' });
-        const shownRange = options.sharedRange && !(options.diffFirst && i > 0 && ['data', 'model'].includes(view.key)) ? shared[j] : range(v.values, v.diverging);
-        toDraw.push(() => heatmap(div, view, v, shownRange, d.ghost_box, options).then(() => group.add(div, view.domain)));
+        const own = range(v.values, v.signed);
+        const shownRange = options.sharedRange && !(options.diffFirst && i > 0 && ['data', 'model'].includes(panel.q)) ? shared[j] : own;
+        const stem = `${pin.run.split('/').pop()}_${pin.img.replace(/\.npy$/, '')}`;
+        toDraw.push(() => heatmap(div, panel, v, shownRange, d.ghost_box, options).then(() => group.add(div, zoomKey(options, panel, i, j))));
+        attachMenu(div, { panel, values: v, zrange: shownRange, ghostBox: d.ghost_box, options, title: `${stem}: ${panelLabel(panel)}`,
+          name: `${stem}_${panel.q}_${panel.space}_${panel.scale}${panel.scale === 'power' ? panel.p : ''}` });
         return h('div', { class: 'panel' }, div);
       });
-      return h('div', { style: `display:grid;grid-template-columns:${columns};gap:6px;align-items:start` }, label, cells);
+      return h('div', { style: `display:grid;grid-template-columns:${columns};gap:6px;align-items:start` }, label, cellsOfRow);
     });
     grid.replaceChildren(header, ...rows);
     for (const f of toDraw) f();
   }
-  draw();
+  refresh();
 }

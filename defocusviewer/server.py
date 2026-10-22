@@ -10,11 +10,11 @@ from pathlib import Path
 import yaml
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import catalog, cluster, jobs, plots, spots
+from . import catalog, cluster, figures, jobs, plots, spots
 from .config import Config
 
 STATIC = Path(__file__).parent / "static"
@@ -283,6 +283,12 @@ def create_app(config: Config, token: str, background: bool = True) -> FastAPI:
             raise HTTPException(404, "no such job") from None
         jobs.cancel(job)
         return {"ok": True}
+
+    @app.post("/api/figure.pdf")
+    def figure_pdf(panel: dict):
+        name = re.sub(r"[^\w.+-]", "_", str(panel.get("filename", "panel")))[:150]
+        return Response(figures.panel_pdf(panel), media_type="application/pdf",
+                        headers={"Content-Disposition": f'attachment; filename="{name}.pdf"'})
 
     @app.get("/api/cluster")
     def cluster_state():

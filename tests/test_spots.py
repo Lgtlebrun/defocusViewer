@@ -12,7 +12,7 @@ def test_table_without_fits(rundir):
     assert all(sources == [] for sources in table["fits"].values())
     detail = spots.detail(rundir, "fa_35000_stability_1.npy", "on")
     assert detail["needs"] == "joint_fit" and detail["ghost"] == "off"      # no masks: the ghost setting falls back to off
-    assert set(detail["images"]) == {"data", "fft_data"}
+    assert set(detail["images"]) == {"data"}
 
 
 def test_ghost_inferred_from_the_last_series_run(tmp_path):

@@ -13,7 +13,8 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from DefocusTest import fit
+from DefocusTest import fit, psf
+from DefocusTest.analysis.JointFitHealthchecks import odd, psf_image, pupil_grid
 from DefocusTest.analysis.SpotLabeler import drop_overwritten_images, load_labeled_dataframe, load_labeled_result_df
 from DefocusTest.analysis.ZernikeStabilityAnalysis import _fit_candidate, load_crop_side, load_fnum, load_pupil_scale
 from DefocusTest.devices import DESI
@@ -29,6 +30,7 @@ HOLD_ROUTINES = {"stability": "ZernikeStabilityTimeSeries", "detection": "Zernik
 GHOST_LINE = re.compile(r"\[(?:\w+:)?(\w+)\] : (\S+): ghost mask applied")
 STEPS_LINE = re.compile(r"Analysis steps of \S+: \[(.*)\]")
 COLUMNS = ["img", "fiber", "routine", "x_position", "timestamp", "texp", "n_frames", "mom_center_x", "mom_center_y"]
+MAX_PUPIL_PX = 161          # the pupil grid of the matrix engine (~940 px) is block-averaged to at most this for display
 
 
 def _one(rundir, name):
@@ -191,13 +193,42 @@ def table(path: Path, viewer_fits: Path | None = None) -> dict:
             "ghost_masks": st.masks is not None}
 
 
-def _b64(array: np.ndarray) -> dict:
+def _b64(array: np.ndarray, coords=None) -> dict:
+    """float32 image as base64; `coords` the axis values (same for x and y) when not pixel indices."""
     a = np.ascontiguousarray(array, dtype=np.float32)
-    return {"shape": list(a.shape), "data": base64.b64encode(a.tobytes()).decode()}
+    out = {"shape": list(a.shape), "data": base64.b64encode(a.tobytes()).decode()}
+    return out if coords is None else {**out, "coords": [float(c) for c in coords]}
 
 
-def _fft_magnitude(image: np.ndarray) -> np.ndarray:
-    return np.abs(np.fft.fftshift(np.fft.fft2(image)))
+def _block_mean(image: np.ndarray, block: int) -> np.ndarray:
+    n = image.shape[0] // block * block
+    return image[:n, :n].reshape(n // block, block, n // block, block).mean(axis=(1, 3))
+
+
+def components(st: "RunState", fiber: str, k: int, params, noll) -> dict:
+    """The parts of a spot's model, as JointFitHealthchecks.plot_grids draws them: pupil amplitude and wavefront (waves, NaN
+    outside the pupil) on the PSF engine's pupil grid (axes in pupil radii), the PSF (k x k, sum 1, image pixels) and the
+    source (k x k, axes in px from the crop centre)."""
+    ajs = fit.build_ajs(tuple(int(j) for j in noll), list(params[3:]))
+    hex_radius = load_pupil_scale(st.rundir, fiber) * psf.nap(k=odd(k), pitch=fit.DEFAULT_PITCH, lbda=fit.DEFAULT_LBDA,
+                                                              fnum=st.fnum)
+    common = dict(theta=st.theta, k=k, hex_radius=hex_radius, supersample=st.supersample, psf_oversample=st.psf_oversample,
+                  fnum=st.fnum)
+    pupil = pupil_grid(st.engine, ajs, **common)
+    centre, radius = pupil["n"] // 2, pupil["radius"]
+    half = min(int(1.15 * radius), centre)
+    window = (slice(centre - half, centre + half + 1),) * 2
+    mask, wavefront = pupil["mask"][window], pupil["wavefront"][window]
+    block = max(1, -(-mask.shape[0] // MAX_PUPIL_PX))
+    inside = (mask > 0.5).astype(float)
+    mask_shown = _block_mean(mask, block)
+    wavefront_shown = _block_mean(wavefront * inside, block) / np.maximum(_block_mean(inside, block), 1e-12)
+    wavefront_shown[mask_shown < 0.5] = np.nan
+    pupil_axis = (np.arange(mask_shown.shape[0]) * block + (block - 1) / 2 - half) / radius
+    source = fit.source_for(st.model)(params[0], [params[1], params[2]], k)
+    return {"pupil": _b64(mask_shown, pupil_axis), "wavefront": _b64(wavefront_shown, pupil_axis),
+            "psf": _b64(psf_image(st.engine, ajs, **common)),
+            "source": _b64(source, np.arange(source.shape[0]) - source.shape[0] // 2)}
 
 
 def viewer_fit_path(folder: Path, img: str, ghost: str) -> Path:
@@ -216,7 +247,7 @@ def load_viewer_fit(folder: Path | None, img: str, ghost: str, st: RunState) -> 
 
 
 def detail(path: Path, img: str, ghost: str, viewer_fits: Path | None = None) -> dict:
-    """Metadata, fits and images (data, model, residual = model - data, |FFT| of each) of one spot.
+    """Metadata, fits and images of one spot: data, model, residual = model - data, and the model's parts (components).
 
     `needs` says what is missing to show a model: "joint_fit" (the rundir has none) or "refit" (no saved or cached fit
     with this ghost setting)."""
@@ -241,13 +272,12 @@ def detail(path: Path, img: str, ghost: str, viewer_fits: Path | None = None) ->
     shown = chosen or (dict(viewer, source="viewer fit") if viewer else None)
     out = {"img": img, "fiber": fiber, "meta": meta, "saved": saved, "viewer_fit": viewer, "fit": shown,
            "ghost": ghost, "ghost_box": ghost_box, "ghost_masks": st.masks is not None, "joint_fit": st.joint,
-           "needs": None if shown else "joint_fit" if not st.joint else "refit", "images": {"data": _b64(image),
-           "fft_data": _b64(_fft_magnitude(image))}}
+           "needs": None if shown else "joint_fit" if not st.joint else "refit", "images": {"data": _b64(image)}}
     if shown and st.joint and fiber != DESI:
         model = render(st, fiber, image, shown["params"], shown["noll"], ghost)
         residual = model - image
-        out["images"].update(model=_b64(model), residual=_b64(residual), fft_model=_b64(_fft_magnitude(model)),
-                             fft_residual=_b64(_fft_magnitude(residual)))
+        out["images"].update(model=_b64(model), residual=_b64(residual),
+                             **components(st, fiber, image.shape[0], shown["params"], shown["noll"]))
         out["residual_frac"] = residual_frac(residual, image, st.weights(fiber, image.shape, ghost),
                                              shown["source"].startswith("joint fit"))
         out["pupil_scale"] = load_pupil_scale(st.rundir, fiber)

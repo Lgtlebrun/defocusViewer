@@ -13,7 +13,21 @@ export async function clusterSummary() {
   const free = c.hosts.filter((host) => window.viewerConfig.job_gpu_hosts.includes(host.host))
     .reduce((n, host) => n + (host.free_gpus?.length || 0), 0);
   const usable = c.partitions.find((p) => p.partition === 'standard')?.usable ?? 0;
-  return `${free} GPU(s) free for us · ${usable} Slurm cores usable now (standard)`;
+  const ours = (c.our_gpus || []).length;
+  return `${ours} GPU process(es) of ours · ${free} GPU(s) free for us · ${usable} Slurm cores usable now (standard)`;
+}
+
+function oursCard(rows) {
+  const body = rows.length ? h('table', { class: 'grid' },
+    h('thead', {}, h('tr', {}, ['host', 'GPU', 'memory', 'running for', 'run', 'steps', 'viewer job', 'process'].map((x) => h('th', {}, x)))),
+    h('tbody', {}, rows.map((r) => h('tr', {},
+      h('td', {}, r.host), h('td', {}, `${r.gpu_index} `, h('span', { class: 'muted' }, (r.gpu_name || '').replace('NVIDIA ', ''))),
+      h('td', {}, `${(r.used_mb / 1024).toFixed(1)} GB`), h('td', {}, r.elapsed),
+      h('td', {}, r.run || h('span', { class: 'muted' }, 'unknown')), h('td', {}, (r.steps || []).join(' ')),
+      h('td', {}, r.job_id ? h('a', { href: `#tab=jobs&job=${r.job_id}` }, r.job_label || r.job_id) : h('span', { class: 'muted' }, 'not from the viewer')),
+      h('td', { class: 'mono small', title: r.command, style: 'max-width:340px;overflow:hidden;text-overflow:ellipsis' }, r.command)))))
+    : h('p', { class: 'muted small' }, 'none of our processes on the GPU hosts');
+  return h('div', { class: 'card' }, h('h3', {}, `GPUs in use by us (${rows.length})`), body);
 }
 
 function hostCard(host) {
@@ -46,6 +60,7 @@ export async function renderCluster() {
   const jobs = Object.entries(c.jobs);
   root.replaceChildren(
     h('div', { class: 'small muted' }, `GPU hosts sampled ${ago(c.updated.hosts)}, Slurm ${ago(c.updated.slurm)}. "Usable" cores: idle cores on nodes with ${(c.mem_per_cpu_mb / 1024).toFixed(1)} GB of unreserved memory per core (Slurm here reserves memory, which often runs out first).`),
+    oursCard(c.our_gpus || []),
     h('div', { class: 'hosts' }, c.hosts.map(hostCard)),
     h('div', { class: 'card' }, h('h3', {}, 'Slurm partitions'), h('table', { class: 'grid' },
       h('thead', {}, h('tr', {}, ['partition', 'nodes', 'cores allocated', 'idle', 'usable now'].map((x) => h('th', {}, x)))),
