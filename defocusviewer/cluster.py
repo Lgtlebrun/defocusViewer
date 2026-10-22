@@ -126,20 +126,19 @@ class Sampler:
 
     def _hosts_loop(self):
         while True:
+            trees = None
             for host in self.config.gpu_hosts:
                 try:
                     state = host_state(host)
+                    if state.get("our_processes") and trees is None:     # right away: a short job's workers are soon gone
+                        trees = {short(h): process_tree(h) for h in self.config.launch_hosts if master_up(h)}
                 except (OSError, subprocess.SubprocessError, ValueError) as e:
                     state = {"host": host, "reachable": False, "hint": str(e)[:200]}
                 with self._lock:
                     self.hosts[host], self.updated["hosts"] = state, time.time()
             with self._lock:
                 hosts = dict(self.hosts)
-            if any(state.get("our_processes") for state in hosts.values()):
-                trees = {short(h): process_tree(h) for h in self.config.launch_hosts if master_up(h)}
-                ours = our_gpus(hosts, trees, self._jobs())
-            else:
-                ours = []
+            ours = our_gpus(hosts, trees, self._jobs()) if trees else []
             with self._lock:
                 self.ours = ours
             time.sleep(HOST_PERIOD_S)

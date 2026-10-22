@@ -116,7 +116,8 @@ def summary(path: Path) -> dict:
     flow_name = flow(path)
     return {"finished": (path / "meta" / "_finished").exists(), "flow": flow_name,
             "has_config": (path / "meta" / "config.yaml").exists(), "steps_done": steps_done(path, flow_name),
-            "joint_fit": (path / "results" / "theta_shared.npy").exists(), "data_link": (path / "data").is_symlink()}
+            "joint_fit": (path / "results" / "theta_shared.npy").exists(), "data_link": (path / "data").is_symlink(),
+            "viewer_fit": (path / "results" / "viewer_joint_fit.json").exists()}
 
 
 class RemoteRuns:

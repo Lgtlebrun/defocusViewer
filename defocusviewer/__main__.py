@@ -1,4 +1,4 @@
-"""defocusviewer serve | url | ensure | fetch <device> <rundir> [--analyse]."""
+"""defocusviewer serve | url | ensure | fetch <device> <rundir> [--analyse] | jointfit <run key> --fnum F [...]."""
 import argparse
 import fcntl
 import getpass
@@ -92,6 +92,16 @@ def main(argv=None):
     f.add_argument("rundir")
     f.add_argument("--analyse", action="store_true")
     f.add_argument("--ghost", choices=("on", "off"), default="on")
+    j = sub.add_parser("jointfit", help="joint fit of a run the pipeline cannot analyse, into its results/ (jointfit.py)")
+    j.add_argument("run", help="run key, e.g. Orbray6/Defocus/20261015-155646_hexagonal-aperture-fit")
+    j.add_argument("--mode", choices=("seeded", "scratch"), default="seeded")
+    j.add_argument("--reference", help="run key of the reference (seeded mode)")
+    j.add_argument("--fnum", type=float, required=True)
+    j.add_argument("--ghost", choices=("on", "off"), default="on")
+    j.add_argument("--fit-theta", action="store_true", help="search theta around the reference's instead of holding it")
+    j.add_argument("--gpu", type=int, help="number of GPUs (fit_joint device gpu)")
+    j.add_argument("--gpu-hosts", help="hosts of the GPUs, in order")
+    j.add_argument("--n-workers", type=int, default=1, help="CPU workers without --gpu")
     args = parser.parse_args(argv)
     config = settings.load()
     if args.command == "serve":
@@ -100,6 +110,11 @@ def main(argv=None):
         print(url(config))
     elif args.command == "ensure":
         ensure(config)
+    elif args.command == "jointfit":
+        from . import jointfit
+        jointfit.run(config, args.run, args.mode, args.reference, args.fnum, args.ghost, args.fit_theta,
+                     device="gpu" if args.gpu else "cpu", n_workers=args.gpu or args.n_workers,
+                     gpu_hosts=args.gpu_hosts.split(",") if args.gpu_hosts else None)
     else:
         fetch(config, args.device, args.rundir, args.analyse, args.ghost)
 

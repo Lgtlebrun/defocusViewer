@@ -41,10 +41,11 @@ def analyses(path: Path, ghost: str) -> dict:
     entry points; `reason` when the rundir has no analysis entry point."""
     flow = catalog.flow(path)
     if flow not in FLOW_MODULES:
-        return {"flow": flow, "reason": f"no analysis entry point for {flow or 'a rundir without a hold routine'}",
-                "steps": [], "default_steps": [], "extras": []}
+        return {"flow": flow, "reason": f"no pipeline entry point for {flow or 'a rundir without a hold routine'}",
+                "steps": [], "default_steps": [], "extras": [], "viewer_joint_fit": True}
     if not (path / "meta" / "config.yaml").exists():
-        return {"flow": flow, "reason": "no meta/config.yaml", "steps": [], "default_steps": [], "extras": []}
+        return {"flow": flow, "reason": "no meta/config.yaml", "steps": [], "default_steps": [], "extras": [],
+                "viewer_joint_fit": True}
     rundir = catalog.open_rundir(path)
     settings = remote.settings_of(rundir, NullLog(), ghost_mask=ghost)
     steps = list(remote.steps(flow, rundir, NullLog(), settings))
@@ -81,6 +82,17 @@ def command(config: Config, module: str, device: str, name: str, steps: list[str
     else:
         argv += ["--n-workers", str(int(res["cpus"]))]
     return argv
+
+
+def jointfit_command(config: Config, key: str, mode: str, reference: str | None, fnum: float, ghost: str, fit_theta: bool,
+                     res: dict) -> list[str]:
+    """argv of the viewer joint fit of run `key` (defocusviewer jointfit) on the resources `res`."""
+    argv = [config.python, "-m", "defocusviewer", "jointfit", key, "--mode", mode, "--fnum", repr(float(fnum)), "--ghost", ghost]
+    argv += ["--reference", reference] if reference else []
+    argv += ["--fit-theta"] if fit_theta else []
+    if res["mode"] == "gpu":
+        return argv + ["--gpu", str(int(res["n_gpus"])), "--gpu-hosts", ",".join(res["gpu_hosts"])]
+    return argv + ["--n-workers", str(int(res["cpus"]))]
 
 
 def _detached(argv: list[str], env: dict) -> str:
@@ -171,7 +183,7 @@ def running_on(config: Config, registry: Registry, run_key: str, name: str) -> l
         out = resources._shell("ps -eo pid=,user=,args=", target) or ""
         for line in out.splitlines():
             pid, user, args = (line.split(None, 2) + ["", ""])[:3]
-            if "DefocusTest.analysis.run_" in args and name in args.split():
+            if ("DefocusTest.analysis.run_" in args or "defocusviewer jointfit" in args) and any(w.endswith(name) for w in args.split()):
                 found.append(f"{host} pid {pid} ({user}): {args[:160]}")
     found += [f"Slurm job {jid} ({j['name']})" for jid, j in resources.slurm_jobs().items() if j["name"] == name]
     return found

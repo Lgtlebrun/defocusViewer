@@ -46,3 +46,16 @@ def test_registry_finishes_a_local_job(config):
     assert job["state"] == "done" and job["exit_code"] == 0
     with pytest.raises(KeyError):
         registry.get("../x")
+
+
+def test_gpu_worker_traced_to_its_job():
+    from defocusviewer import cluster
+    tree = {10: (1, "bash -c x"),
+            11: (10, "/v/python -m DefocusTest.analysis.run_stability 20261015-161039_stability-fnum4 --device orbray6 --now "
+                     "--only ghost_mask refit --gpu 2"),
+            12: (11, "ssh -o BatchMode=yes farm-gpu5 cd /x && env CUDA_VISIBLE_DEVICES=1 OMP_NUM_THREADS=1 /v/python -m amkit.gpupool"),
+            13: (11, "ssh -o BatchMode=yes farm-gpu5 cd /x && env CUDA_VISIBLE_DEVICES=2 OMP_NUM_THREADS=1 /v/python -m amkit.gpupool")}
+    hosts = {"farm-gpu5": {"our_processes": [{"gpu_index": 2, "pid": 999, "used_mb": 5000}]}}
+    [row] = cluster.our_gpus(hosts, {"farm-gpu1": tree}, [{"id": "J1", "host": "farm-gpu1", "pid": 10, "run": "a/b/x",
+                                                          "label": "ghost_mask refit"}])
+    assert (row["run"], row["steps"], row["job_id"]) == ("20261015-161039_stability-fnum4", ["ghost_mask", "refit"], "J1")

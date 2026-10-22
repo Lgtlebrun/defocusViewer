@@ -84,8 +84,60 @@ export async function launch(request, onDone) {
   }
 }
 
+export async function viewerFitModal(info, ghost, onDone) {
+  // The viewer's joint fit of a run the pipeline cannot analyse (jointfit.py): mode, reference, f-number, ghost, resources
+  const o = await api(`/api/jointfit/options?${q({ run: info.key })}`);
+  const refLabel = (r) => `${r.key.split('/').pop()} · f/${r.fnum ?? '?'}${r.hours_apart !== null ? ` · ${r.hours_apart} h apart` : ''}${r.viewer_made ? ' · viewer fit' : ''}`;
+  const reference = h('select', {}, o.references.map((r) => h('option', { value: r.key }, refLabel(r))));
+  const mode = h('select', {},
+    h('option', { value: 'seeded', selected: o.default_mode === 'seeded', disabled: !o.references.length }, 'seeded: theta from the reference, wavelength per fiber refitted'),
+    h('option', { value: 'reuse', disabled: !o.references.length }, 'reuse as is: copy theta and wavelengths, fit spots when opened (instant)'),
+    h('option', { value: 'scratch', selected: o.default_mode === 'scratch' }, 'from scratch: search theta and wavelengths'));
+  const fnum = h('input', { type: 'number', min: 0.5, max: 32, step: 0.1, value: o.fnum ?? '' });
+  const ghostSelect = h('select', {}, ['on', 'off'].map((g) => h('option', { value: g, selected: g === ghost }, `ghost mask ${g}`)));
+  const fitTheta = h('input', { type: 'checkbox' });
+  const editor = resourcesEditor(o.default_resources, o.free_gpus, o.cpu_resources);
+  const matched = Object.entries(o.matched || {}).filter(([f, r]) => f !== r).map(([f, r]) => `${f} → ${r ?? 'none (median wavelength)'}`);
+  const warnings = [
+    !o.has_x_position && o.n_images <= 3 * o.fibers.length ? 'few stacks per fiber at one stage position: the from-scratch mode is weakly constrained, prefer seeded' : null,
+    /circular/.test(info.name) ? 'circular aperture: the model only has a hexagonal pupil, residuals will show the mismatch' : null,
+    o.pipeline_fit ? 'this run already has a pipeline joint fit: it would be overwritten' : null,
+    o.existing ? `replaces the viewer fit of ${o.existing.made} (${o.existing.mode})` : null,
+  ].filter(Boolean);
+  modal(h('div', {},
+    h('h3', {}, 'Fit this run'),
+    h('p', { class: 'small' }, `${o.n_images} spots of ${o.fibers.length} fibers, ${o.image_side} px. The result goes into the run's results/ under the pipeline's names (+ viewer_joint_fit.json).`),
+    h('dl', { class: 'kv' },
+      h('dt', {}, 'mode'), h('dd', {}, mode),
+      h('dt', {}, 'reference'), h('dd', {}, o.references.length ? reference : 'none with a joint fit on this device'),
+      h('dt', {}, 'f-number'), h('dd', {}, fnum, h('span', { class: 'muted small' }, ` from ${o.fnum_source}`)),
+      h('dt', {}, 'ghost'), h('dd', {}, ghostSelect, h('span', { class: 'muted small' }, ' on: unmasked fit, boxes from its residuals, masked fit')),
+      h('dt', {}, 'theta'), h('dd', {}, h('label', {}, fitTheta, ' search theta around the reference\'s (seeded)')),
+      matched.length ? [h('dt', {}, 'fibers matched'), h('dd', {}, matched.join(', '))] : null),
+    warnings.map((w) => h('p', { class: 'banner warn small' }, w)),
+    h('div', { style: 'margin:8px 0' }, editor.el),
+    h('p', { class: 'muted small' }, `About ${o.n_images * 19 * 2 * 2} least-squares fits (seeded, ghost on): seconds on GPUs, minutes on 10 cores.`),
+    h('div', { class: 'row' }, h('span', { class: 'spacer' }), h('button', { onclick: closeModal }, 'Cancel'),
+      h('button', { class: 'primary', onclick: async () => {
+        if (!Number(fnum.value)) { toast('Give the f-number', true); return; }
+        const request = { run: info.key, mode: mode.value, reference: mode.value === 'scratch' ? null : reference.value || null,
+          fnum: Number(fnum.value), ghost: ghostSelect.value, fit_theta: fitTheta.checked, resources: editor.value() };
+        closeModal();
+        try {
+          const out = await post('/api/jointfit', request);
+          toast(out.done ? 'Theta and wavelengths copied: open a spot to fit it' : `Started job ${out.id}: ${out.label}`);
+          onDone?.(out);
+        } catch (e) {
+          if (e.status === 409 && confirm(`Something already works on this run:\n${e.message}\n\nLaunch anyway?`)) {
+            post('/api/jointfit', { ...request, force: true }).then((out) => toast(`Started job ${out.id}`)).catch((err) => toast(err.message, true));
+          } else toast(e.message, true);
+        }
+      } }, 'Run'))));
+}
+
 export async function jointFitModal(info, ghost) {
   const data = await api(`/api/analyses?${q({ run: info.key, ghost })}`);
+  if (data.viewer_joint_fit) { viewerFitModal(info, ghost); return; }
   if (data.reason || !data.device) { toast(data.reason || 'this run is not under the data root: it cannot be analysed here', true); return; }
   const steps = ['fit', ...(ghost === 'on' ? ['ghost_mask', 'refit'] : [])].filter((s) => data.steps.includes(s));
   const withSeries = h('input', { type: 'checkbox' });
@@ -111,7 +163,16 @@ export async function renderAnalyses(body, info) {
   ghostSelect.onchange = () => { try { localStorage.setItem('ghost', ghostSelect.value); } catch { /* blocked */ } renderAnalyses(body, info); };
   const root = h('div', { class: 'pad', style: 'display:flex;flex-direction:column;gap:12px;max-width:1100px' });
   body.replaceChildren(root);
-  if (data.reason) { root.append(h('p', { class: 'banner warn' }, data.reason)); return; }
+  if (data.reason) {
+    root.append(h('p', { class: 'banner warn' }, data.reason));
+    if (data.viewer_joint_fit) {
+      root.append(h('div', { class: 'card' }, h('h3', {}, 'Viewer joint fit'),
+        h('p', { class: 'small' }, 'Fits every spot of this run jointly (theta, wavelength per fiber, per-spot r, centre, Zernikes), seeded by an analysed run of the same device, with the pipeline\'s ghost hunt. The spots tab then shows models and residuals.'),
+        info.viewer_fit ? h('p', { class: 'small muted' }, 'This run already has a viewer joint fit: running again replaces it.') : null,
+        h('button', { class: 'primary', onclick: () => viewerFitModal(info, ghost) }, 'Fit this run…')));
+    }
+    return;
+  }
   if (!data.device) { root.append(h('p', { class: 'banner warn' }, 'This run is not under the data root: the analysis entry points cannot find it.')); return; }
 
   const boxes = data.steps.map((step) => {

@@ -14,7 +14,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTex
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import catalog, cluster, figures, jobs, plots, spots
+from . import catalog, cluster, figures, jobs, jointfit, plots, spots
 from .config import Config
 
 STATIC = Path(__file__).parent / "static"
@@ -35,6 +35,17 @@ class JobRequest(BaseModel):
     analysis: str = "flow"              # "flow" (the steps of run_<flow>) or an extra entry point
     steps: list[str] = []
     ghost: str = "on"
+    resources: dict = {}
+    force: bool = False
+
+
+class JointFitRequest(BaseModel):
+    run: str
+    mode: str = "seeded"
+    reference: str | None = None
+    fnum: float
+    ghost: str = "on"
+    fit_theta: bool = False
     resources: dict = {}
     force: bool = False
 
@@ -252,6 +263,33 @@ def create_app(config: Config, token: str, background: bool = True) -> FastAPI:
             raise HTTPException(409, str(e)) from None
         except ValueError as e:
             raise HTTPException(400, str(e)) from None
+
+    @app.get("/api/jointfit/options")
+    def jointfit_options(run: str):
+        run_path(run)
+        free = sampler.free_gpus()
+        return {**jointfit.options(config, run), "free_gpus": free, "default_resources": jobs.default_resources(config, free, True),
+                "cpu_resources": jobs.default_resources(config, free, False)}
+
+    @app.post("/api/jointfit")
+    def start_jointfit(request: JointFitRequest):
+        path, ghost = run_path(request.run), _ghost(request.ghost)
+        if request.mode not in jointfit.MODES or not 0.5 <= request.fnum <= 32:
+            raise HTTPException(400, "mode is seeded, scratch or reuse; fnum within 0.5-32")
+        if request.reference is not None and request.reference not in {r["key"] for r in jointfit.references(config, request.run)}:
+            raise HTTPException(400, f"{request.reference} is not a reference for this run")
+        if request.mode in ("seeded", "reuse") and request.reference is None:
+            raise HTTPException(400, f"mode {request.mode} needs a reference")
+        if request.mode == "reuse":
+            return {"done": True, **jointfit.reuse(config, request.run, request.reference, request.fnum)}
+        res = checked_resources(config, request.resources)
+        argv = jobs.jointfit_command(config, request.run, request.mode, request.reference, request.fnum, ghost,
+                                     request.fit_theta, res)
+        try:
+            return jobs.launch(config, registry, request.run, argv, res, f"viewer joint fit ({request.mode})", ghost,
+                               request.force, rundir=path)
+        except jobs.Conflict as e:
+            raise HTTPException(409, str(e)) from None
 
     @app.post("/api/fetch")
     def fetch(request: FetchRequest):

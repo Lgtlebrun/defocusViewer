@@ -48,6 +48,7 @@ function badges(run) {
   if (run.local && run.flow && !run.joint_fit) out.push(h('span', { class: 'badge warn' }, 'no joint fit'));
   if (run.steps_done?.length) out.push(h('span', { class: 'badge ok', title: run.steps_done.join(', ') }, `${run.steps_done.length} steps`));
   if (run.steps_done?.includes('ghost_mask')) out.push(h('span', { class: 'badge' }, 'ghost masks'));
+  if (run.viewer_fit) out.push(h('span', { class: 'badge ok', title: 'joint fit made by the viewer (results/viewer_joint_fit.json)' }, 'viewer fit'));
   if (run.data_link) out.push(h('span', { class: 'badge', title: 'data/ is a symlink: an analysis copy' }, 'copy'));
   if (run.key.startsWith('calibration_stand/')) out.push(h('span', { class: 'badge warn', title: 'no fiducial table in DefocusTest/devices.py: analyses may fail' }, 'no fiducials'));
   return out;
