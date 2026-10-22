@@ -76,8 +76,9 @@ def fetch(config, device: str, name: str, analyse: bool, ghost: str):
     free = {h: cluster.host_state(h).get("free_gpus") or [] for h in config.job_gpu_hosts}
     res = jobs.default_resources(config, free, bool(set(info["default_steps"]) & jobs.GPU_STEPS))
     argv = jobs.command(config, jobs.FLOW_MODULES[info["flow"]], device, name, info["default_steps"], ghost, res)
+    # force: the run was not local before this fetch, so the only job on it is this one (which the guard would see)
     job = jobs.launch(config, jobs.Registry(config.jobs_dir), f"{device}/{config.test}/{name}", argv, res,
-                      " ".join(info["default_steps"]), ghost, rundir=path)
+                      " ".join(info["default_steps"]), ghost, force=True, rundir=path)
     print(f"started analysis job {job['id']} ({res['mode']}): {' '.join(argv)}")
 
 
@@ -103,6 +104,7 @@ def main(argv=None):
     j.add_argument("--gpu-hosts", help="hosts of the GPUs, in order")
     j.add_argument("--n-workers", type=int, default=1, help="CPU workers without --gpu")
     j.add_argument("--pupil-shape", choices=("hexagon", "circle"), default="hexagon", help="aperture of the model")
+    j.add_argument("--source", help="source model (default: the reference's)")
     args = parser.parse_args(argv)
     config = settings.load()
     if args.command == "serve":
@@ -115,7 +117,8 @@ def main(argv=None):
         from . import jointfit
         jointfit.run(config, args.run, args.mode, args.reference, args.fnum, args.ghost, args.fit_theta,
                      device="gpu" if args.gpu else "cpu", n_workers=args.gpu or args.n_workers,
-                     gpu_hosts=args.gpu_hosts.split(",") if args.gpu_hosts else None, pupil_shape=args.pupil_shape)
+                     gpu_hosts=args.gpu_hosts.split(",") if args.gpu_hosts else None, pupil_shape=args.pupil_shape,
+                     source=args.source)
     else:
         fetch(config, args.device, args.rundir, args.analyse, args.ghost)
 

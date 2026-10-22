@@ -205,9 +205,10 @@ def _save_common(rundir, theta: float, scales: dict, settings: dict, fnum: float
     (rundir.results / PROVENANCE).write_text(json.dumps(provenance, indent=1, default=str))
 
 
-def _with_pupil(settings: dict, pupil_shape: str) -> dict:
-    """Settings whose model carries `pupil_shape` ("tophat_bl" or "tophat_bl@circle"), theta 0 for a circle."""
-    source = psf.split_model(settings["model"])[0]
+def _with_pupil(settings: dict, pupil_shape: str, source: str | None = None) -> dict:
+    """Settings whose model has `source` (default: the settings' own) and `pupil_shape` ("tophat_bl" or
+    "tophat_bl@circle"), theta 0 for a circle."""
+    source = source or psf.split_model(settings["model"])[0]
     out = dict(settings, model=source if pupil_shape == "hexagon" else f"{source}@{pupil_shape}")
     if pupil_shape == "circle":
         out["theta"] = 0.0
@@ -246,12 +247,13 @@ def _residuals(images: imgDF, diag: pd.DataFrame, theta: float, scales: dict, se
 
 
 def run(config: Config, key: str, mode: str, reference: str | None, fnum: float, ghost: str, fit_theta: bool = False,
-        device: str = "cpu", n_workers: int = 1, gpu_hosts=None, pupil_shape: str = "hexagon", log=print) -> dict:
+        device: str = "cpu", n_workers: int = 1, gpu_hosts=None, pupil_shape: str = "hexagon", source: str | None = None,
+        log=print) -> dict:
     """The joint fit of the module docstring on every spot of run `key`, saved into its results/."""
     path = catalog.resolve(config, key)
     rundir = catalog.open_rundir(path)
     settings = _with_pupil(reference_settings(catalog.resolve(config, reference)) if reference else dict(DEFAULT_SETTINGS),
-                           pupil_shape)
+                           pupil_shape, source)
     circle = pupil_shape == "circle"
     fit_theta = fit_theta and not circle
     df = spot_table(path)

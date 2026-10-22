@@ -1,5 +1,5 @@
 // The Analyses subtab, the joint-fit prompt of the spot panel, and the resources editor ("Advanced settings").
-import { h, api, post, q, toast, modal, closeModal } from './ui.js';
+import { h, api, post, q, toast, modal, closeModal, setHash } from './ui.js';
 
 const GPU_STEPS = ['fit', 'ghost_mask', 'refit', 'series'];
 const STEP_HELP = {
@@ -165,6 +165,48 @@ export async function jointFitModal(info, ghost) {
       } }, 'Run'))));
 }
 
+async function variantCard(info) {
+  // another source / aperture model: a variant rundir sharing the data, analysed in full, the run's results untouched
+  const v = await api(`/api/variants?${q({ run: info.key })}`);
+  const own = v.family.find((m) => m.key === info.key) || v.family[0];
+  const [ownSource, ownAperture] = (own.model || 'tophat_bl').split('@');
+  const source = h('select', {}, v.sources.map((s) => h('option', { value: s, selected: s === ownSource }, s + (v.gpu_sources.includes(s) ? '' : ' (CPU only)'))));
+  const aperture = h('select', {}, v.apertures.map((a) => h('option', { value: a, selected: a === (ownAperture || 'hexagon') }, a)));
+  const ghost = h('select', {}, ['on', 'off'].map((g) => h('option', { value: g, selected: g === storedGhost() }, `ghost mask ${g}`)));
+  const suffix = h('input', { type: 'text', size: 22 });
+  let edited = false;
+  suffix.oninput = () => { edited = true; };
+  const editor = resourcesEditor(v.default_resources, v.free_gpus, v.cpu_resources);
+  const sync = () => {
+    if (!edited) suffix.value = `${source.value.replace('_', '')}-${aperture.value}`;
+    editor.setMode(v.gpu_sources.includes(source.value) && v.default_resources.mode === 'gpu' ? 'gpu' : 'slurm');
+  };
+  source.onchange = sync;
+  aperture.onchange = sync;
+  sync();
+  const open = (key) => { setHash({ run: key }); window.dispatchEvent(new PopStateEvent('popstate')); };
+  const members = v.family.map((m) => h('tr', { class: m.key === info.key ? 'selected' : '' },
+    h('td', {}, m.suffix ?? 'original'), h('td', { class: 'mono' }, m.model || '?'),
+    h('td', { class: 'muted small' }, m.made.made ? `made ${m.made.made.replace('T', ' ')}` : ''),
+    h('td', {}, m.key === info.key ? h('span', { class: 'muted small' }, 'shown') : h('a', { href: '#', onclick: (e) => { e.preventDefault(); open(m.key); } }, 'open'))));
+  return h('div', { class: 'card' }, h('h3', {}, 'Rerun with another model'),
+    h('p', { class: 'small' }, 'Makes a variant of this run, ', h('span', { class: 'mono' }, `${v.family[0].key.split('/').pop()}_<suffix>`),
+      ', that shares its data and asks for another source or aperture model, then runs the whole analysis on it. The results of this run are not touched; pick a variant with the selector at the top of the run.'),
+    h('div', { class: 'row' }, 'source ', source, ' aperture ', aperture, ghost, ' suffix ', suffix),
+    h('div', { style: 'margin:6px 0' }, editor.el),
+    h('div', { class: 'row' }, h('span', { class: 'spacer' }), h('button', { class: 'primary', onclick: async () => {
+      try {
+        const out = await post('/api/variants', { run: info.key, suffix: suffix.value.trim(), source: source.value, aperture: aperture.value,
+          ghost: ghost.value, resources: editor.value() });
+        toast(`Variant ${out.variant.split('/').pop()} created, job ${out.job.id} started: ${out.job.label}`);
+        window.dispatchEvent(new Event('runschange'));
+        open(out.variant);
+      } catch (e) { toast(e.message, true); }
+    } }, 'Create the variant and analyse it')),
+    v.family.length > 1 ? h('details', { open: true, style: 'margin-top:6px' }, h('summary', {}, `Analyses of this run (${v.family.length})`),
+      h('table', { class: 'grid' }, h('tbody', {}, members))) : null);
+}
+
 export async function renderAnalyses(body, info) {
   const ghost = storedGhost();
   body.replaceChildren(h('p', { class: 'pad muted' }, 'loading…'));
@@ -173,6 +215,7 @@ export async function renderAnalyses(body, info) {
   ghostSelect.onchange = () => { try { localStorage.setItem('ghost', ghostSelect.value); } catch { /* blocked */ } renderAnalyses(body, info); };
   const root = h('div', { class: 'pad', style: 'display:flex;flex-direction:column;gap:12px;max-width:1100px' });
   body.replaceChildren(root);
+  const variants = variantCard(info);
   if (data.reason) {
     root.append(h('p', { class: 'banner warn' }, data.reason));
     if (data.viewer_joint_fit) {
@@ -181,6 +224,7 @@ export async function renderAnalyses(body, info) {
         info.viewer_fit ? h('p', { class: 'small muted' }, 'This run already has a viewer joint fit: running again replaces it.') : null,
         h('button', { class: 'primary', onclick: () => viewerFitModal(info, ghost) }, 'Fit this run…')));
     }
+    if (data.viewer_joint_fit) root.append(await variants);
     return;
   }
   if (!data.device) { root.append(h('p', { class: 'banner warn' }, 'This run is not under the data root: the analysis entry points cannot find it.')); return; }
@@ -225,5 +269,6 @@ export async function renderAnalyses(body, info) {
       }, `run_${extra}`))),
       h('div', { class: 'small muted', style: 'margin-top:4px' }, `Each runs as a Slurm job of ${data.cpu_resources.cpus} cores.`)),
     h('div', { class: 'card' }, h('h3', {}, 'Jobs of this run'), jobsList));
+  root.insertBefore(await variants, root.lastChild);
   refreshJobs();
 }

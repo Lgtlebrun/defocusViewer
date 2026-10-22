@@ -87,6 +87,7 @@ main { flex: 1; min-height: 0; display: flex; }
 .run-item:hover { background: var(--surface-2); }
 .run-item.selected { background: var(--accent-soft); }
 .run-item.remote { color: var(--grey-run); }
+.run-item.variant { margin-left: 14px; border-left: 2px solid var(--border); border-radius: 0 6px 6px 0; }
 .run-item .name { font-size: 12.5px; word-break: break-all; }
 .run-item .star { border: none; background: none; padding: 0 2px; font-size: 14px; color: var(--warning); line-height: 1; }
 .run-item .star:hover { transform: scale(1.2); }

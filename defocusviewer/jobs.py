@@ -85,12 +85,13 @@ def command(config: Config, module: str, device: str, name: str, steps: list[str
 
 
 def jointfit_command(config: Config, key: str, mode: str, reference: str | None, fnum: float, ghost: str, fit_theta: bool,
-                     res: dict, pupil_shape: str = "hexagon") -> list[str]:
+                     res: dict, pupil_shape: str = "hexagon", source: str | None = None) -> list[str]:
     """argv of the viewer joint fit of run `key` (defocusviewer jointfit) on the resources `res`."""
     argv = [config.python, "-m", "defocusviewer", "jointfit", key, "--mode", mode, "--fnum", repr(float(fnum)), "--ghost", ghost,
             "--pupil-shape", pupil_shape]
     argv += ["--reference", reference] if reference else []
     argv += ["--fit-theta"] if fit_theta else []
+    argv += ["--source", source] if source else []
     if res["mode"] == "gpu":
         return argv + ["--gpu", str(int(res["n_gpus"])), "--gpu-hosts", ",".join(res["gpu_hosts"])]
     return argv + ["--n-workers", str(int(res["cpus"]))]

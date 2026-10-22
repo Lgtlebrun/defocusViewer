@@ -17,6 +17,7 @@ export const runByKey = (key) => runs.find((r) => r.key === key);
 export async function initRuns() {
   await loadRuns();
   setInterval(loadRuns, 30000);
+  window.addEventListener('runschange', () => { loadRuns(); });
 }
 
 export async function loadRuns() {
@@ -57,6 +58,21 @@ function badges(run) {
   return out;
 }
 
+function withVariants(items, runItem) {
+  // the runs of a group, each original followed by its variants (local runs named `<original>_<suffix>`), indented
+  const local = items.filter((r) => r.local);
+  const parentOf = (run) => local.filter((p) => p !== run && run.local && run.name.startsWith(`${p.name}_`))
+    .sort((a, b) => b.name.length - a.name.length)[0];
+  const children = new Map();
+  const top = [];
+  for (const run of items) {
+    const parent = parentOf(run);
+    if (parent) (children.get(parent) || children.set(parent, []).get(parent)).push(run);
+    else top.push(run);
+  }
+  return top.flatMap((run) => [runItem(run), ...(children.get(run) || []).sort((a, b) => a.name.localeCompare(b.name)).map((v) => runItem(v, run))]);
+}
+
 function renderList() {
   const aside = document.getElementById('run-list');
   const opened = openGroups();
@@ -68,31 +84,32 @@ function renderList() {
     (groups[run.group] ||= []).push(run);
   }
   const selected = getHash().run;
-  const runItem = (run) => {
+  const runItem = (run, parent = null) => {
     const { date, slug } = prettyName(run.name);
+    const label = parent ? [h('span', { class: 'muted' }, '↳ '), run.name.slice(parent.name.length + 1)] : [h('span', { class: 'muted' }, date), ' ', slug];
     const star = h('button', { class: 'star', title: pinned.has(run.key) ? 'unpin' : 'pin on top of the list', onclick: async (e) => {
       e.stopPropagation();
       pinned = new Set(await post('/api/pinned', { run: run.key, pinned: !pinned.has(run.key) }));
       renderList();
     } }, pinned.has(run.key) ? '★' : '☆');
     return h('div', {
-      class: `run-item${run.local ? '' : ' remote'}${run.key === selected ? ' selected' : ''}`, title: run.key,
+      class: `run-item${run.local ? '' : ' remote'}${run.key === selected ? ' selected' : ''}${parent ? ' variant' : ''}`, title: run.key,
       onclick: () => { setHash({ run: run.key, sub: null, img: null, tab: null }); showRunFromHash(); renderList(); },
     }, h('div', { class: 'row', style: 'gap:4px;flex-wrap:nowrap;align-items:flex-start' },
-      h('span', { class: 'name', style: 'flex:1' }, h('span', { class: 'muted' }, date), ' ', slug), star),
+      h('span', { class: 'name', style: 'flex:1' }, label), star),
     h('div', { class: 'badges' }, badges(run)));
   };
   const pinnedRuns = runs.filter((r) => pinned.has(r.key) && (!search || r.name.toLowerCase().includes(search)));
   const pinnedGroup = pinnedRuns.length ? h('details', { class: 'group', open: true },
     h('summary', {}, '★ Pinned ', h('span', { class: 'muted small' }, `${pinnedRuns.length}`)),
-    pinnedRuns.sort((a, b) => b.name.localeCompare(a.name)).map(runItem)) : null;
+    pinnedRuns.sort((a, b) => b.name.localeCompare(a.name)).map((r) => runItem(r))) : null;
   const children = Object.keys(groups).sort((a, b) => groupOrder(a) - groupOrder(b) || a.localeCompare(b)).map((group) => {
     const items = groups[group].sort((a, b) => b.name.localeCompare(a.name));
     const nLocal = items.filter((r) => r.local).length;
     const isOpen = opened[group] ?? (nLocal > 0);
     const details = h('details', { class: 'group', open: isOpen },
       h('summary', {}, `${group} `, h('span', { class: 'muted small' }, `${nLocal} local, ${items.length - nLocal} on rig`)),
-      items.map(runItem));
+      withVariants(items, runItem));
     details.addEventListener('toggle', () => {
       const state = openGroups();
       state[group] = details.open;
@@ -139,10 +156,23 @@ export function showRunFromHash() {
   }
 }
 
+function variantSelector(info) {
+  // the run and its variants (other source / aperture models, copies): picking one shows it in the same tab and spot
+  const holder = h('span', { class: 'row', style: 'gap:4px;margin-left:8px' });
+  api(`/api/variants?${q({ run: info.key })}`).then((v) => {
+    if (v.family.length < 2) return;
+    const select = h('select', {}, v.family.map((m) => h('option', { value: m.key, selected: m.key === info.key },
+      `${m.suffix ?? 'original'} · ${m.model || '?'}`)));
+    select.onchange = () => { setHash({ run: select.value }); showRunFromHash(); renderList(); };
+    holder.replaceChildren(h('span', { class: 'muted small' }, 'analysis'), select);
+  }).catch(() => {});
+  return holder;
+}
+
 function runHeader(info, subtab) {
   const { date, slug } = prettyName(info.name);
   return h('div', { class: 'run-header' },
-    h('h2', {}, slug, ' ', h('span', { class: 'muted small' }, `${date} · ${info.group}`)),
+    h('h2', { class: 'row', style: 'gap:6px' }, slug, h('span', { class: 'muted small' }, `${date} · ${info.group}`), variantSelector(info)),
     h('div', { class: 'badges', style: 'margin-top:4px' }, badges(info)),
     h('div', { class: 'subtabs' }, Object.entries(SUBTABS).map(([key, label]) =>
       h('button', { class: key === subtab ? 'active' : '', onclick: () => { setHash({ sub: key === 'spots' ? null : key }); showRunFromHash(); } }, label))));

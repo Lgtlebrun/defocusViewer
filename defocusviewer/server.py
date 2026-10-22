@@ -17,7 +17,9 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTex
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import catalog, cluster, figures, jobs, jointfit, plots, spots, summary
+from DefocusTest import fit, psf, psf_batch
+
+from . import catalog, cluster, figures, jobs, jointfit, plots, spots, summary, variants
 from .config import Config
 
 STATIC = Path(__file__).parent / "static"
@@ -59,6 +61,16 @@ class JointFitRequest(BaseModel):
 class PinRequest(BaseModel):
     run: str
     pinned: bool
+
+
+class VariantRequest(BaseModel):
+    run: str
+    suffix: str
+    source: str = "tophat_bl"
+    aperture: str = "hexagon"
+    ghost: str = "on"
+    resources: dict = {}
+    force: bool = False
 
 
 class FetchRequest(BaseModel):
@@ -385,6 +397,42 @@ def create_app(config: Config, token: str, background: bool = True) -> FastAPI:
                                request.force, rundir=path)
         except jobs.Conflict as e:
             raise HTTPException(409, str(e)) from None
+
+    @app.get("/api/variants")
+    def run_variants(run: str):
+        run_path(run)
+        free = sampler.free_gpus()
+        return {"family": variants.family(config, run), "sources": sorted(fit.SOURCE_MODELS), "apertures": psf.PUPIL_SHAPES,
+                "gpu_sources": psf_batch.BATCH_MODELS, "default_resources": jobs.default_resources(config, free, True),
+                "cpu_resources": jobs.default_resources(config, free, False), "free_gpus": free}
+
+    @app.post("/api/variants")
+    def create_variant(request: VariantRequest):
+        run_path(request.run)
+        ghost, res = _ghost(request.ghost), checked_resources(config, request.resources)
+        if res["mode"] == "gpu" and request.source not in psf_batch.BATCH_MODELS:
+            raise HTTPException(400, f"the GPU fits implement {', '.join(psf_batch.BATCH_MODELS)}: run {request.source} on the CPU")
+        try:
+            key = variants.create(config, request.run, request.suffix, request.source, request.aperture, ghost)
+        except FileExistsError as e:
+            raise HTTPException(409, str(e)) from None
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from None
+        path, device = run_path(key), catalog.device_of(config, key)
+        info = jobs.analyses(path, ghost)
+        if not info["reason"] and device:
+            argv = jobs.command(config, jobs.FLOW_MODULES[info["flow"]], device, path.name, info["default_steps"], ghost, res)
+            label = "full analysis (" + variants.model_name(request.source, request.aperture) + ")"
+        else:
+            options = jointfit.options(config, key)
+            reference = options["references"][0]["key"] if options["references"] else None
+            if options["fnum"] is None:
+                raise HTTPException(400, f"{key} created, but its f-number is unknown: fit it from its Analyses tab")
+            argv = jobs.jointfit_command(config, key, "seeded" if reference else "scratch", reference, options["fnum"], ghost,
+                                         False, res, request.aperture, request.source)
+            label = "viewer joint fit (" + variants.model_name(request.source, request.aperture) + ")"
+        job = jobs.launch(config, registry, key, argv, res, label, ghost, force=True, rundir=path)
+        return {"variant": key, "job": job}
 
     @app.post("/api/fetch")
     def fetch(request: FetchRequest):
