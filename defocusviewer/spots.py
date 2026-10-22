@@ -212,7 +212,7 @@ def components(st: "RunState", fiber: str, k: int, params, noll) -> dict:
     hex_radius = load_pupil_scale(st.rundir, fiber) * psf.nap(k=odd(k), pitch=fit.DEFAULT_PITCH, lbda=fit.DEFAULT_LBDA,
                                                               fnum=st.fnum)
     common = dict(theta=st.theta, k=k, hex_radius=hex_radius, supersample=st.supersample, psf_oversample=st.psf_oversample,
-                  fnum=st.fnum)
+                  fnum=st.fnum, shape=psf.split_model(st.model)[1])
     pupil = pupil_grid(st.engine, ajs, **common)
     centre, radius = pupil["n"] // 2, pupil["radius"]
     half = min(int(1.15 * radius), centre)

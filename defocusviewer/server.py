@@ -46,6 +46,7 @@ class JointFitRequest(BaseModel):
     fnum: float
     ghost: str = "on"
     fit_theta: bool = False
+    pupil_shape: str = "hexagon"
     resources: dict = {}
     force: bool = False
 
@@ -278,17 +279,17 @@ def create_app(config: Config, token: str, background: bool = True) -> FastAPI:
     @app.post("/api/jointfit")
     def start_jointfit(request: JointFitRequest):
         path, ghost = run_path(request.run), _ghost(request.ghost)
-        if request.mode not in jointfit.MODES or not 0.5 <= request.fnum <= 32:
-            raise HTTPException(400, "mode is seeded, scratch or reuse; fnum within 0.5-32")
+        if request.mode not in jointfit.MODES or not 0.5 <= request.fnum <= 32 or request.pupil_shape not in ("hexagon", "circle"):
+            raise HTTPException(400, "mode is seeded, scratch or reuse; fnum within 0.5-32; pupil_shape hexagon or circle")
         if request.reference is not None and request.reference not in {r["key"] for r in jointfit.references(config, request.run)}:
             raise HTTPException(400, f"{request.reference} is not a reference for this run")
         if request.mode in ("seeded", "reuse") and request.reference is None:
             raise HTTPException(400, f"mode {request.mode} needs a reference")
         if request.mode == "reuse":
-            return {"done": True, **jointfit.reuse(config, request.run, request.reference, request.fnum)}
+            return {"done": True, **jointfit.reuse(config, request.run, request.reference, request.fnum, request.pupil_shape)}
         res = checked_resources(config, request.resources)
         argv = jobs.jointfit_command(config, request.run, request.mode, request.reference, request.fnum, ghost,
-                                     request.fit_theta, res)
+                                     request.fit_theta, res, request.pupil_shape)
         try:
             return jobs.launch(config, registry, request.run, argv, res, f"viewer joint fit ({request.mode})", ghost,
                                request.force, rundir=path)

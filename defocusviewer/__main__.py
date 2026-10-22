@@ -102,6 +102,7 @@ def main(argv=None):
     j.add_argument("--gpu", type=int, help="number of GPUs (fit_joint device gpu)")
     j.add_argument("--gpu-hosts", help="hosts of the GPUs, in order")
     j.add_argument("--n-workers", type=int, default=1, help="CPU workers without --gpu")
+    j.add_argument("--pupil-shape", choices=("hexagon", "circle"), default="hexagon", help="aperture of the model")
     args = parser.parse_args(argv)
     config = settings.load()
     if args.command == "serve":
@@ -114,7 +115,7 @@ def main(argv=None):
         from . import jointfit
         jointfit.run(config, args.run, args.mode, args.reference, args.fnum, args.ghost, args.fit_theta,
                      device="gpu" if args.gpu else "cpu", n_workers=args.gpu or args.n_workers,
-                     gpu_hosts=args.gpu_hosts.split(",") if args.gpu_hosts else None)
+                     gpu_hosts=args.gpu_hosts.split(",") if args.gpu_hosts else None, pupil_shape=args.pupil_shape)
     else:
         fetch(config, args.device, args.rundir, args.analyse, args.ghost)
 

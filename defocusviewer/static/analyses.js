@@ -96,11 +96,12 @@ export async function viewerFitModal(info, ghost, onDone) {
   const fnum = h('input', { type: 'number', min: 0.5, max: 32, step: 0.1, value: o.fnum ?? '' });
   const ghostSelect = h('select', {}, ['on', 'off'].map((g) => h('option', { value: g, selected: g === ghost }, `ghost mask ${g}`)));
   const fitTheta = h('input', { type: 'checkbox' });
+  const pupil = h('select', {}, ['hexagon', 'circle'].map((s) => h('option', { value: s, selected: s === o.default_pupil_shape }, s)));
   const editor = resourcesEditor(o.default_resources, o.free_gpus, o.cpu_resources);
   const matched = Object.entries(o.matched || {}).filter(([f, r]) => f !== r).map(([f, r]) => `${f} → ${r ?? 'none (median wavelength)'}`);
   const warnings = [
     !o.has_x_position && o.n_images <= 3 * o.fibers.length ? 'few stacks per fiber at one stage position: the from-scratch mode is weakly constrained, prefer seeded' : null,
-    /circular/.test(info.name) ? 'circular aperture: the model only has a hexagonal pupil, residuals will show the mismatch' : null,
+    /circular/.test(info.name) && o.default_pupil_shape !== 'circle' ? 'the run name says circular: choose the circle aperture' : null,
     o.pipeline_fit ? 'this run already has a pipeline joint fit: it would be overwritten' : null,
     o.existing ? `replaces the viewer fit of ${o.existing.made} (${o.existing.mode})` : null,
   ].filter(Boolean);
@@ -112,7 +113,8 @@ export async function viewerFitModal(info, ghost, onDone) {
       h('dt', {}, 'reference'), h('dd', {}, o.references.length ? reference : 'none with a joint fit on this device'),
       h('dt', {}, 'f-number'), h('dd', {}, fnum, h('span', { class: 'muted small' }, ` from ${o.fnum_source}`)),
       h('dt', {}, 'ghost'), h('dd', {}, ghostSelect, h('span', { class: 'muted small' }, ' on: unmasked fit, boxes from its residuals, masked fit')),
-      h('dt', {}, 'theta'), h('dd', {}, h('label', {}, fitTheta, ' search theta around the reference\'s (seeded)')),
+      h('dt', {}, 'aperture'), h('dd', {}, pupil, h('span', { class: 'muted small' }, ' circle: theta held at 0 (a disc has no orientation)')),
+      h('dt', {}, 'theta'), h('dd', {}, h('label', {}, fitTheta, ' search theta around the reference\'s (seeded, hexagon)')),
       matched.length ? [h('dt', {}, 'fibers matched'), h('dd', {}, matched.join(', '))] : null),
     warnings.map((w) => h('p', { class: 'banner warn small' }, w)),
     h('div', { style: 'margin:8px 0' }, editor.el),
@@ -121,7 +123,8 @@ export async function viewerFitModal(info, ghost, onDone) {
       h('button', { class: 'primary', onclick: async () => {
         if (!Number(fnum.value)) { toast('Give the f-number', true); return; }
         const request = { run: info.key, mode: mode.value, reference: mode.value === 'scratch' ? null : reference.value || null,
-          fnum: Number(fnum.value), ghost: ghostSelect.value, fit_theta: fitTheta.checked, resources: editor.value() };
+          fnum: Number(fnum.value), ghost: ghostSelect.value, fit_theta: fitTheta.checked, pupil_shape: pupil.value,
+          resources: editor.value() };
         closeModal();
         try {
           const out = await post('/api/jointfit', request);

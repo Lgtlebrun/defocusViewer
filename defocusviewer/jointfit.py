@@ -8,6 +8,7 @@ Modes:
 - "scratch": theta and the wavelengths searched over their whole range, as the pipeline does;
 - "reuse": no fit, the reference's theta and the wavelengths of the matched fibers copied (the spots are then fitted one by
   one when opened).
+pupil_shape "circle" fits a circular aperture (model "<source>@circle", theta held at 0: a disc has no orientation).
 With ghost "on" the ghost hunt of the pipeline follows: unmasked fit, ghost boxes found in its residuals
 (postprocessing.fiber_ghost_table), masked fit seeded by the unmasked one.
 """
@@ -18,7 +19,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from DefocusTest import fit
+from DefocusTest import fit, psf
 from DefocusTest.analysis.SpotLabeler import drop_overwritten_images, load_labeled_dataframe, load_labeled_result_df
 from DefocusTest.analysis.ZernikeStabilityAnalysis import load_crop_side
 from DefocusTest.devices import DESI, FIDUCIALS
@@ -152,6 +153,7 @@ def options(config: Config, key: str) -> dict:
             "n_images": len(df), "fibers": sorted(df["fiber"].unique()), "matched": matched,
             "image_side": int(np.load(path / "data" / df["img"].iloc[0], mmap_mode="r").shape[0]) if len(df) else None,
             "has_x_position": bool((df["x_position"] != 1).any()), "default_mode": "seeded" if refs else "scratch",
+            "default_pupil_shape": "circle" if "circular" in path.name else "hexagon",
             "existing": json.loads(provenance.read_text()) if provenance.exists() else None,
             "pipeline_fit": (path / "results" / "theta_shared.npy").exists() and not provenance.exists()}
 
@@ -203,15 +205,24 @@ def _save_common(rundir, theta: float, scales: dict, settings: dict, fnum: float
     (rundir.results / PROVENANCE).write_text(json.dumps(provenance, indent=1, default=str))
 
 
-def reuse(config: Config, key: str, reference: str, fnum: float) -> dict:
+def _with_pupil(settings: dict, pupil_shape: str) -> dict:
+    """Settings whose model carries `pupil_shape` ("tophat_bl" or "tophat_bl@circle"), theta 0 for a circle."""
+    source = psf.split_model(settings["model"])[0]
+    out = dict(settings, model=source if pupil_shape == "hexagon" else f"{source}@{pupil_shape}")
+    if pupil_shape == "circle":
+        out["theta"] = 0.0
+    return out
+
+
+def reuse(config: Config, key: str, reference: str, fnum: float, pupil_shape: str = "hexagon") -> dict:
     """Copies the reference's theta and the wavelengths of the matched fibers into the run (no fit)."""
     path = catalog.resolve(config, key)
-    settings = reference_settings(catalog.resolve(config, reference))
+    settings = _with_pupil(reference_settings(catalog.resolve(config, reference)), pupil_shape)
     df = spot_table(path)
     lbda_nm, matched = _lbda_start(df, settings)
     k = min(settings["crop_side"], int(np.load(path / "data" / df["img"].iloc[0], mmap_mode="r").shape[0]))
     provenance = {"mode": "reuse", "reference": reference, "matched": matched, "fnum": fnum, "theta": settings["theta"],
-                  "made": datetime.now().isoformat(timespec="seconds")}
+                  "pupil_shape": pupil_shape, "made": datetime.now().isoformat(timespec="seconds")}
     for stale in ("joint_fit_diag_records", "joint_fit_diag_records_unmasked", "joint_fit_history", "r_lines", GHOST_MASKS):
         (path / "results" / f"{stale}.hdf5").unlink(missing_ok=True)      # they belong to an earlier fit
     _save_common(catalog.open_rundir(path), settings["theta"], {f: fit.DEFAULT_LBDA * 1e9 / l for f, l in lbda_nm.items()},
@@ -235,11 +246,14 @@ def _residuals(images: imgDF, diag: pd.DataFrame, theta: float, scales: dict, se
 
 
 def run(config: Config, key: str, mode: str, reference: str | None, fnum: float, ghost: str, fit_theta: bool = False,
-        device: str = "cpu", n_workers: int = 1, gpu_hosts=None, log=print) -> dict:
+        device: str = "cpu", n_workers: int = 1, gpu_hosts=None, pupil_shape: str = "hexagon", log=print) -> dict:
     """The joint fit of the module docstring on every spot of run `key`, saved into its results/."""
     path = catalog.resolve(config, key)
     rundir = catalog.open_rundir(path)
-    settings = reference_settings(catalog.resolve(config, reference)) if reference else dict(DEFAULT_SETTINGS)
+    settings = _with_pupil(reference_settings(catalog.resolve(config, reference)) if reference else dict(DEFAULT_SETTINGS),
+                           pupil_shape)
+    circle = pupil_shape == "circle"
+    fit_theta = fit_theta and not circle
     df = spot_table(path)
     k = min(settings["crop_side"], int(load_stack(path / "data" / df["img"].iloc[0]).shape[0]))
     images = imgDF(df, rundir=rundir, crop_side=k)
@@ -257,12 +271,14 @@ def run(config: Config, key: str, mode: str, reference: str | None, fnum: float,
                                                  else {"theta_fixed": settings["theta"]}))
         c4 = _c4_start(images, settings["theta"], lbda_nm, settings, fnum, k)
     else:
+        seed = {"theta_fixed": 0.0} if circle else {}
         c4 = _c4_start(images, settings.get("theta", 0.0), {f: fit.DEFAULT_LBDA * 1e9 for f in df["fiber"].unique()},
                        settings, fnum, k)
     log(f"{key}: {len(df)} spots, k={k}, fnum={fnum}, mode={mode}, reference={reference}, c4 start {c4:+.2f}, matched {matched}")
     theta, scales, diag, history, r_lines = fit.fit_joint(images, p4_0=(1.0, 0.0, 0.0, c4), **common, **seed)
     provenance = {"mode": mode, "reference": reference, "matched": matched, "fnum": fnum, "fit_theta": fit_theta,
-                  "ghost": ghost, "n_images": len(df), "c4_start": c4, "made": datetime.now().isoformat(timespec="seconds")}
+                  "ghost": ghost, "pupil_shape": pupil_shape, "model": settings["model"], "n_images": len(df), "c4_start": c4,
+                  "made": datetime.now().isoformat(timespec="seconds")}
     if ghost == "on":
         rundir.saveResultDf(diag, "joint_fit_diag_records_unmasked")
         frames, residuals = _residuals(images, diag, theta, scales, settings, fnum, k)
@@ -271,7 +287,8 @@ def run(config: Config, key: str, mode: str, reference: str | None, fnum: float,
         log("ghost boxes: " + ", ".join(f"{r.fiber} ({r.gx:.1f}, {r.gy:.1f}) found {r.n_found}/{r.n_frames}"
                                         for r in table.itertuples()))
         masked = dict(lbda_center_init={f: fit.DEFAULT_LBDA * 1e9 / s for f, s in scales.items()},
-                      **({"theta_center_init": theta} if fit_theta or mode == "scratch" else {"theta_fixed": theta}))
+                      **({"theta_center_init": theta} if (fit_theta or mode == "scratch") and not circle
+                         else {"theta_fixed": theta}))
         theta, scales, diag, history, r_lines = fit.fit_joint(images, p4_0=(1.0, 0.0, 0.0, c4), **common, **masked,
                                                               weights=GhostMasks(table).for_fibers((k, k)) or None)
     else:
