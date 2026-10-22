@@ -186,18 +186,25 @@ document.addEventListener('keydown', (event) => {
 
 let request = 0;
 
+let inflight = null;
+
 async function showSpot(img) {
+  // the last spot asked for wins: wait for the arrow keys to settle, and cancel the request of a spot left behind
   const mine = ++request;
   const ghost = ghostSetting();
+  inflight?.abort();
   els.right.replaceChildren(h('p', { class: 'muted' }, h('span', { class: 'spinner' }), ' loading ', img));
+  await new Promise((resolve) => setTimeout(resolve, 120));
+  if (mine !== request) return;
+  inflight = new AbortController();
   let detail;
   try {
-    detail = await api(`/api/spot?${q({ run: table.run, img, ghost })}`);
+    detail = await api(`/api/spot?${q({ run: table.run, img, ghost })}`, { signal: inflight.signal });
   } catch (e) {
-    els.right.replaceChildren(h('p', { class: 'banner warn' }, e.message));
+    if (e.name !== 'AbortError' && mine === request) els.right.replaceChildren(h('p', { class: 'banner warn' }, e.message));
     return;
   }
-  if (mine !== request) return;
+  if (mine !== request || !detail) return;
   renderSpot(detail);
   if (detail.needs === 'refit') refit(detail, mine);
 }

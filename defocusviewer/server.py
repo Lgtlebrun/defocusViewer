@@ -5,6 +5,8 @@ import json
 import multiprocessing
 import os
 import re
+import threading
+from collections import OrderedDict
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
@@ -21,6 +23,7 @@ from .config import Config
 STATIC = Path(__file__).parent / "static"
 COOKIE = "defocusviewer"
 PARTITIONS = ("express", "standard", "long", "verylong")
+DETAIL_CACHE = 32           # spots whose detail is kept in memory (about 0.7 MB each)
 LOGIN_HINT = ("<h3>defocusViewer: not logged in</h3><p>Open the login URL printed by <code>defocusviewer url</code> "
               "on farm-gpu1 (it sets a cookie in this browser).</p>")
 
@@ -125,6 +128,14 @@ def create_app(config: Config, token: str, background: bool = True) -> FastAPI:
 
     def viewer_fits(key: str) -> Path:
         return config.spotfits_dir / key
+
+    @app.middleware("http")
+    async def cache_headers(request: Request, call_next):
+        response = await call_next(request)
+        if request.url.path.startswith("/static/"):       # the page's own modules are checked on every load
+            response.headers["Cache-Control"] = ("public, max-age=31536000, immutable" if "/vendor/" in request.url.path
+                                                 else "no-cache")
+        return response
 
     @app.middleware("http")
     async def require_login(request: Request, call_next):
@@ -239,12 +250,34 @@ def create_app(config: Config, token: str, background: bool = True) -> FastAPI:
             raise HTTPException(404, "no full-frame image in results/")
         return FileResponse(png)
 
+    detail_slots = asyncio.Semaphore(4)       # spots computed at once (more only share the GIL)
+    detail_cache, cache_lock = OrderedDict(), threading.Lock()
+
+    def cached_detail(path: Path, run: str, img: str, ghost: str) -> dict:
+        """spots.detail, kept for the last DETAIL_CACHE spots while the run's results and the viewer fit are unchanged."""
+        fits = viewer_fits(run)
+        key = (str(path), img, ghost, spots._signature(path), catalog._mtime(spots.viewer_fit_path(fits, img, ghost)))
+        with cache_lock:
+            if key in detail_cache:
+                detail_cache.move_to_end(key)
+                return detail_cache[key]
+        out = spots.detail(path, img, ghost, fits)
+        with cache_lock:
+            detail_cache[key] = out
+            while len(detail_cache) > DETAIL_CACHE:
+                detail_cache.popitem(last=False)
+        return out
+
     @app.get("/api/spot")
-    def spot(run: str, img: str, ghost: str = "on"):
-        try:
-            return spots.detail(run_path(run), img, _ghost(ghost), viewer_fits(run))
-        except KeyError:
-            raise HTTPException(404, f"no spot {img}") from None
+    async def spot(request: Request, run: str, img: str, ghost: str = "on"):
+        path, ghost = run_path(run), _ghost(ghost)
+        async with detail_slots:
+            if await request.is_disconnected():      # the viewer has moved on to another spot
+                return Response(status_code=204)
+            try:
+                return await asyncio.to_thread(cached_detail, path, run, img, ghost)
+            except KeyError:
+                raise HTTPException(404, f"no spot {img}") from None
 
     @app.post("/api/spot/refit")
     async def spot_refit(request: SpotRequest):
@@ -259,7 +292,7 @@ def create_app(config: Config, token: str, background: bool = True) -> FastAPI:
             raise HTTPException(500, f"refit failed: {e}") from None
         finally:
             refits["inflight"].pop(key, None)
-        return await asyncio.to_thread(spots.detail, path, request.img, ghost, viewer_fits(request.run))
+        return await asyncio.to_thread(cached_detail, path, request.run, request.img, ghost)
 
     @app.get("/api/analyses")
     def run_analyses(run: str, ghost: str = "on"):
