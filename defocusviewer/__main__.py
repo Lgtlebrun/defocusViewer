@@ -1,10 +1,12 @@
 """defocusviewer serve | url | ensure | fetch <device> <rundir> [--analyse]."""
 import argparse
 import fcntl
+import getpass
 import os
 import socket
 import subprocess
 import sys
+import time
 import urllib.error
 import urllib.request
 
@@ -16,6 +18,7 @@ TMUX_SESSION = "defocusviewer"
 def serve(config):
     import uvicorn
     from .server import create_app
+    os.environ.setdefault("USER", getpass.getuser())     # cron starts us without it (squeue -u $USER)
     uvicorn.run(create_app(config, settings.token()), host=config.host, port=config.port, log_level="warning",
                 access_log=False)
 
@@ -43,8 +46,11 @@ def ensure(config):
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             return
-        if answering(config):
-            return
+        running = subprocess.run(["tmux", "has-session", "-t", TMUX_SESSION], capture_output=True).returncode == 0
+        for _ in range(30 if running else 1):     # a session just started needs a few seconds to answer
+            if answering(config):
+                return
+            time.sleep(2)
         subprocess.run(["tmux", "kill-session", "-t", TMUX_SESSION], capture_output=True)
         log = config.state_dir / "server.log"
         command = f"{sys.executable} -m defocusviewer serve >> {log} 2>&1"
