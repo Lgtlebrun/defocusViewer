@@ -9,9 +9,10 @@ from defocusviewer import jobs
 def test_default_resources(config):
     free = {"farm-gpu5": [2], "farm-gpu1": [0, 1], "farm-gpu6": [0]}
     gpu = jobs.default_resources(config, free, uses_gpu=True)
-    assert gpu == {"mode": "gpu", "n_gpus": 2, "gpu_hosts": ["farm-gpu5", "farm-gpu1"], "cpu_workers": 4,
+    assert gpu == {"mode": "gpu", "n_gpus": 2, "gpu_hosts": ["farm-gpu5", "farm-gpu1", "farm-gpu6"], "cpu_workers": 4,
                    "launch_host": "farm-gpu1"}
-    assert jobs.default_resources(config, {"farm-gpu6": [0]}, uses_gpu=True)["mode"] == "slurm"   # gpu6 not a job host
+    assert jobs.default_resources(config, {"farm-gpu6": [0]}, uses_gpu=True)["gpu_hosts"] == ["farm-gpu6"]
+    assert jobs.default_resources(config, {"farm-gpu3": [0]}, uses_gpu=True)["mode"] == "slurm"   # gpu3 not a job host
     assert jobs.default_resources(config, free, uses_gpu=False) == {
         "mode": "slurm", "cpus": 10, "partition": "standard", "mem_per_cpu": "2000M", "time": None}
 
