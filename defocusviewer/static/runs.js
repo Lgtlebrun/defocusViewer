@@ -73,16 +73,25 @@ function withVariants(items, runItem) {
   return top.flatMap((run) => [runItem(run), ...(children.get(run) || []).sort((a, b) => a.name.localeCompare(b.name)).map((v) => runItem(v, run))]);
 }
 
+function matchesSearch(run, terms) {
+  // every word of the filter must appear in "<device or label> <run name>", so "mps6 fnum8" finds the runs of that device
+  const text = `${run.group.split('/')[0]} ${run.name}`.toLowerCase();
+  return terms.every((t) => text.includes(t));
+}
+
 function renderList() {
   const aside = document.getElementById('run-list');
   const opened = openGroups();
-  const search = listState.search.toLowerCase();
+  const search = listState.search.trim().toLowerCase();
+  const terms = search.split(/\s+/).filter(Boolean);
   const groups = {};
   for (const run of runs) {
     if (!run.local && !listState.remote) continue;
-    if (search && !run.name.toLowerCase().includes(search)) continue;
+    if (terms.length && !matchesSearch(run, terms)) continue;
     (groups[run.group] ||= []).push(run);
   }
+  const oldBox = aside.querySelector('input[type=text]');
+  const keepFocus = oldBox && document.activeElement === oldBox ? [oldBox.selectionStart, oldBox.selectionEnd] : null;
   const selected = getHash().run;
   const runItem = (run, parent = null) => {
     const { date, slug } = prettyName(run.name);
@@ -99,18 +108,19 @@ function renderList() {
       h('span', { class: 'name', style: 'flex:1' }, label), star),
     h('div', { class: 'badges' }, badges(run)));
   };
-  const pinnedRuns = runs.filter((r) => pinned.has(r.key) && (!search || r.name.toLowerCase().includes(search)));
+  const pinnedRuns = runs.filter((r) => pinned.has(r.key) && (!terms.length || matchesSearch(r, terms)));
   const pinnedGroup = pinnedRuns.length ? h('details', { class: 'group', open: true },
     h('summary', {}, '★ Pinned ', h('span', { class: 'muted small' }, `${pinnedRuns.length}`)),
     pinnedRuns.sort((a, b) => b.name.localeCompare(a.name)).map((r) => runItem(r))) : null;
   const children = Object.keys(groups).sort((a, b) => groupOrder(a) - groupOrder(b) || a.localeCompare(b)).map((group) => {
     const items = groups[group].sort((a, b) => b.name.localeCompare(a.name));
     const nLocal = items.filter((r) => r.local).length;
-    const isOpen = opened[group] ?? (nLocal > 0);
+    const isOpen = terms.length > 0 || (opened[group] ?? (nLocal > 0));    // a filter shows its matches, whatever the folding
     const details = h('details', { class: 'group', open: isOpen },
       h('summary', {}, `${group} `, h('span', { class: 'muted small' }, `${nLocal} local, ${items.length - nLocal} on rig`)),
       withVariants(items, runItem));
     details.addEventListener('toggle', () => {
+      if (terms.length) return;     // opened by the filter, not by the user
       const state = openGroups();
       state[group] = details.open;
       try { localStorage.setItem('openGroups', JSON.stringify(state)); } catch { /* storage blocked */ }
@@ -118,7 +128,7 @@ function renderList() {
     return details;
   });
   const searchBox = h('input', { type: 'text', placeholder: 'filter runs', value: listState.search, style: 'width:100%' });
-  searchBox.oninput = () => { listState.search = searchBox.value; renderList(); document.querySelector('#run-list input[type=text]').focus(); };
+  searchBox.oninput = () => { listState.search = searchBox.value; renderList(); };
   const remoteToggle = h('input', { type: 'checkbox', checked: listState.remote });
   remoteToggle.onchange = () => { listState.remote = remoteToggle.checked; renderList(); };
   const refresh = h('button', { class: 'small', onclick: async () => { await post('/api/remote/refresh'); toast('Listing pos-control again (a few seconds)'); setTimeout(loadRuns, 5000); } }, 'refresh');
@@ -129,6 +139,10 @@ function renderList() {
     h('div', { class: 'small muted', style: 'margin-bottom:6px' },
       listState.error ? `pos-control: ${listState.error}` : `pos-control listed ${ago(listState.updated)}`),
     pinnedGroup, ...children);
+  if (keepFocus) {      // the box is rebuilt with the list: put the caret back where it was (also on the 30 s refresh)
+    searchBox.focus();
+    searchBox.setSelectionRange(...keepFocus);
+  }
 }
 
 export function showRunFromHash() {
