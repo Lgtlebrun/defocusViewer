@@ -78,7 +78,10 @@ header.top { display: flex; align-items: center; gap: 16px; padding: 6px 12px; b
 main { flex: 1; min-height: 0; display: flex; }
 .tab { display: none; flex: 1; min-height: 0; overflow: auto; }
 .tab.active { display: flex; }
-#tab-compare, #tab-jobs, #tab-cluster { flex-direction: column; padding: 12px; gap: 12px; }
+#tab-compare, #tab-jobs, #tab-cluster, #tab-lab { flex-direction: column; padding: 12px; gap: 12px; }
+.lab-monitor { display: flex; flex-direction: column; gap: 12px; }
+.lab-form td { vertical-align: middle; }
+.state-stopped { color: var(--good); }
 
 /* run list */
 #run-list { width: 300px; min-width: 240px; border-right: 1px solid var(--border); overflow: auto; background: var(--surface-1); padding: 8px; }

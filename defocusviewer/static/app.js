@@ -4,9 +4,10 @@ import { initRuns, showRunFromHash } from './runs.js';
 import { renderCompare, pinCount } from './compare.js';
 import { renderJobs, runningCount } from './jobs.js';
 import { renderCluster, clusterSummary } from './cluster.js';
+import { renderLab, labSummary } from './lab.js';
 
-const TABS = ['runs', 'compare', 'jobs', 'cluster'];
-const renderers = { compare: renderCompare, jobs: renderJobs, cluster: renderCluster };
+const TABS = ['runs', 'compare', 'jobs', 'cluster', 'lab'];
+const renderers = { compare: renderCompare, jobs: renderJobs, cluster: renderCluster, lab: renderLab };
 let current = null;
 
 function showTab(tab) {
@@ -47,6 +48,7 @@ async function tick() {
     const n = await runningCount();
     document.getElementById('job-count').textContent = n || '';
     document.getElementById('cluster-summary').textContent = await clusterSummary();
+    document.getElementById('lab-count').textContent = (await labSummary()) || '';
   } catch { /* shown on the tabs themselves */ }
 }
 

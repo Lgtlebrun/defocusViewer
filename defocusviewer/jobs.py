@@ -97,11 +97,12 @@ def jointfit_command(config: Config, key: str, mode: str, reference: str | None,
     return argv + ["--n-workers", str(int(res["cpus"]))]
 
 
-def _detached(argv: list[str], env: dict) -> str:
-    """Shell command running `argv` in its own session (so cancel can signal the whole group), nice 10, ending with
-    a line `__exit__ <code>` in its output."""
-    inner = " ".join([*(f"{k}={shlex.quote(v)}" for k, v in env.items()), "nice -n 10", shlex.join(argv)])
-    return f"setsid bash -c {shlex.quote(inner + '; echo __exit__ $?')}"
+def _detached(argv: list[str], env: dict, nice: int | None = 10, login: bool = False) -> str:
+    """Shell command running `argv` in its own session (so cancel can signal the whole group), at `nice`, ending with
+    a line `__exit__ <code>` in its output; `login`: in a login shell (the host's /etc/profile.d variables)."""
+    inner = " ".join([*(f"{k}={shlex.quote(v)}" for k, v in env.items()), *([f"nice -n {int(nice)}"] if nice is not None else []),
+                      shlex.join(argv)])
+    return f"setsid bash {'-lc' if login else '-c'} {shlex.quote(inner + '; echo __exit__ $?')}"
 
 
 class Registry:
@@ -154,7 +155,7 @@ class Registry:
             return jobs
 
     def _finish_local(self, job: dict):
-        found = EXIT_LINE.findall(tail(Path(job["log"]), 4096))
+        found = EXIT_LINE.findall(job_tail(job, 4096))
         code = int(found[-1]) if found else None
         job.update(state="done" if code == 0 else "failed" if code is not None else "killed", exit_code=code,
                    ended=datetime.now().isoformat(timespec="seconds"))
@@ -229,6 +230,14 @@ def cancel(job: dict) -> None:
     else:
         host = job["host"]
         resources._shell(f"kill -TERM -- -{int(job['pid'])}", None if resources.is_local(host) else host)
+
+
+def job_tail(job: dict, size: int = 32768) -> str:
+    """Last `size` bytes of a job's log, read over SSH when it lives on another host (`log_host`, the lab rig)."""
+    if not job.get("log_host"):
+        return tail(Path(job["log"]), size)
+    out = resources._shell(f"tail -c {int(size)} {shlex.quote(job['log'])}", job["log_host"])
+    return ANSI.sub("", out or "")
 
 
 def tail(path: Path, size: int = 32768) -> str:

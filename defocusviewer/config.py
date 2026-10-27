@@ -35,6 +35,19 @@ class Config:
     slurm_partition: str = "standard"
     slurm_mem_per_cpu: str = "2000M"
     refit_workers: int = 4
+    # the lab rig (Lab tab): paths on pos-control, and the devices whose holders the probe reports (the Basler cameras
+    # are found by USB vendor id); a launch waits while the stage, a camera or an LED array is held
+    lab_host: str = "pos-control@pos-control.physik.uzh.ch"
+    lab_root: str = "/home/pos-control/Leonard/Defocus_cam_fiber"
+    lab_python: str = "/home/pos-control/Leonard/Defocus_cam_fiber/LAB-Pos-Utils/.posEnv/bin/python"
+    lab_data: str = "/mnt/data1/positioners/data"
+    lab_state: str = "/home/pos-control/Leonard/defocusViewer-lab"
+    lab_devices: dict = field(default_factory=lambda: {
+        "stage": "/dev/serial/by-id/usb-XIMC_XIMC_Motor_Controller_000098E6-if00",
+        "PWM_array_01": "/dev/PWM_array_01", "PWM_array_02": "/dev/PWM_array_02", "PWM_array_03": "/dev/PWM_array_03",
+        "temperature_arduino": "/dev/temperature_arduino", "mount": "/dev/telescope_mount"})
+    # holders the launch guard ignores (shown, not blocking): the monitoring services keep a serial port open for weeks
+    lab_services: str = r"LabUZHMonitoring|services\.(Env|Machine)Monitoring"
 
     @property
     def jobs_dir(self) -> Path:

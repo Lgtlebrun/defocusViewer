@@ -26,7 +26,7 @@ export async function renderJobs() {
     h('td', { class: `state-${j.state}` }, j.state, j.exit_code !== undefined && j.exit_code !== null ? ` (${j.exit_code})` : ''),
     h('td', {}, h('a', { href: `#${new URLSearchParams({ run: j.run, sub: 'analyses' })}`, onclick: (e) => e.stopPropagation() }, j.run.split('/').pop())),
     h('td', {}, j.label), h('td', { class: 'muted' }, resourcesText(j)),
-    h('td', {}, (j.state === 'running' || j.state === 'pending') ? h('button', { class: 'small', onclick: async (e) => {
+    h('td', {}, j.mode === 'lab' ? h('a', { href: '#tab=lab', onclick: (e) => e.stopPropagation() }, 'Lab tab') : (j.state === 'running' || j.state === 'pending') ? h('button', { class: 'small', onclick: async (e) => {
       e.stopPropagation();
       if (!confirm(`Cancel job ${j.id} (${j.label})?`)) return;
       await post(`/api/jobs/${j.id}/cancel`);

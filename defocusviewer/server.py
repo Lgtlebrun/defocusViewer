@@ -19,7 +19,7 @@ from pydantic import BaseModel
 
 from DefocusTest import fit, psf, psf_batch
 
-from . import catalog, cluster, figures, jobs, jointfit, plots, spots, summary, variants
+from . import catalog, cluster, figures, jobs, jointfit, lab, plots, spots, summary, variants
 from .config import Config
 
 STATIC = Path(__file__).parent / "static"
@@ -79,6 +79,22 @@ class FetchRequest(BaseModel):
     ghost: str = "on"
 
 
+class LabLaunchRequest(BaseModel):
+    routine: str
+    overrides: dict = {}
+    analyse_after: bool = True
+    ghost: str = "on"
+    confirm: bool = False               # False: only the changes and what blocks a launch (the preview)
+
+
+class LabRunRequest(BaseModel):
+    rundir: str
+
+
+class LabJobRequest(BaseModel):
+    job: str
+
+
 def _ghost(value: str) -> str:
     if value not in ("on", "off"):
         raise HTTPException(400, "ghost is on or off")
@@ -121,6 +137,15 @@ def create_app(config: Config, token: str, background: bool = True) -> FastAPI:
     remote, sampler, registry = catalog.RemoteRuns(config), cluster.Sampler(config), jobs.Registry(config.jobs_dir)
     refits = {"pool": None, "inflight": {}}
     os.environ["POS_LOCAL_DATA"] = str(config.data_root)
+
+    def fetch_job(device: str, name: str, analyse: bool, ghost: str) -> dict:
+        argv = [config.python, "-m", "defocusviewer", "fetch", device, name]
+        argv += ["--analyse", "--ghost", ghost] if analyse else []
+        res = {"mode": "local", "launch_host": config.launch_hosts[0]}
+        label = "fetch + analyse" if analyse else "fetch"
+        return jobs.launch(config, registry, f"{device}/{config.test}/{name}", argv, res, label, force=True)
+
+    rig = lab.Monitor(config, registry, on_finished=lambda run, job: fetch_job(run["device"], run["name"], True, job["ghost"]))
     def fit_pool() -> ProcessPoolExecutor:
         if refits["pool"] is None:
             refits["pool"] = ProcessPoolExecutor(config.refit_workers, mp_context=multiprocessing.get_context("spawn"),
@@ -130,6 +155,7 @@ def create_app(config: Config, token: str, background: bool = True) -> FastAPI:
     if background:
         remote.start()
         sampler.start()
+        rig.start()
         for _ in range(config.refit_workers):     # the first spot fit then finds warm workers
             fit_pool().submit(spots.warm_up)
 
@@ -439,11 +465,7 @@ def create_app(config: Config, token: str, background: bool = True) -> FastAPI:
         parts = request.run.split("/")
         if request.run not in remote.snapshot()["runs"] or len(parts) != 3:
             raise HTTPException(404, f"{request.run} is not a run on pos-control")
-        argv = [config.python, "-m", "defocusviewer", "fetch", parts[0], parts[2]]
-        argv += ["--analyse", "--ghost", _ghost(request.ghost)] if request.analyse else []
-        res = {"mode": "local", "launch_host": config.launch_hosts[0]}
-        label = "fetch + analyse" if request.analyse else "fetch"
-        return jobs.launch(config, registry, request.run, argv, res, label, force=True)
+        return fetch_job(parts[0], parts[2], request.analyse, _ghost(request.ghost))
 
     @app.get("/api/jobs")
     def list_jobs():
@@ -452,7 +474,7 @@ def create_app(config: Config, token: str, background: bool = True) -> FastAPI:
     @app.get("/api/jobs/{job_id}/log", response_class=PlainTextResponse)
     def job_log(job_id: str):
         try:
-            return jobs.tail(Path(registry.get(job_id)["log"]))
+            return jobs.job_tail(registry.get(job_id))
         except (KeyError, FileNotFoundError):
             raise HTTPException(404, "no such job") from None
 
@@ -474,5 +496,84 @@ def create_app(config: Config, token: str, background: bool = True) -> FastAPI:
     @app.get("/api/cluster")
     def cluster_state():
         return sampler.snapshot()
+
+    @app.get("/api/lab")
+    def lab_state():
+        return rig.snapshot()
+
+    @app.get("/api/lab/routine")
+    def lab_routine(name: str):
+        if name not in lab.ROUTINES:
+            raise HTTPException(404, f"no routine {name}")
+        try:
+            base = lab.base_config(config, name)
+        except RuntimeError as e:
+            raise HTTPException(502, str(e)) from None
+        return {"routine": name, "config": f"{config.lab_root}/{lab.ROUTINES[name]['config']}",
+                "fields": [{**f.describe(), "value": lab.get_key(base, f.key)} for f in lab.ROUTINES[name]["fields"]]}
+
+    @app.post("/api/lab/launch")
+    def lab_launch(request: LabLaunchRequest):
+        if request.routine not in lab.ROUTINES:
+            raise HTTPException(404, f"no routine {request.routine}")
+        ghost = _ghost(request.ghost)
+        try:
+            run_config, changes = lab.merged_config(request.routine, lab.base_config(config, request.routine), request.overrides)
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from None
+        except RuntimeError as e:
+            raise HTTPException(502, str(e)) from None
+        rig.sample()                        # the guard on the rig as it is now, not 15 s ago
+        snapshot = rig.snapshot()
+        busy = [f"rig unreachable: {snapshot['error']}"] if snapshot["error"] else snapshot["busy"]
+        if not request.confirm:
+            return {"changes": changes, "busy": busy, "yaml": yaml.safe_dump(run_config, sort_keys=False)}
+        if busy:
+            raise HTTPException(409, "; ".join(busy))
+        label = f"{request.routine} ({lab.get_key(run_config, 'output.path')})"
+        try:
+            job = lab.launch(config, registry, request.routine, run_config, label, request.analyse_after, ghost)
+        except RuntimeError as e:
+            raise HTTPException(502, str(e)) from None
+        rig.refresh()
+        return job
+
+    def known_run(rundir: str) -> dict:
+        try:
+            return rig.known_rundir(rundir)
+        except KeyError:
+            raise HTTPException(404, f"{rundir} is not a run the Lab tab follows") from None
+
+    @app.post("/api/lab/stop")
+    def lab_stop(request: LabRunRequest):
+        run = known_run(request.rundir)
+        if not run["writers"]:
+            raise HTTPException(409, f"{run['name']} is not running")
+        try:
+            lab.request_stop(config, run["rundir"])
+        except RuntimeError as e:
+            raise HTTPException(502, str(e)) from None
+        rig.refresh()
+        return {"ok": True, "hook": run["hook"]}
+
+    @app.post("/api/lab/kill")
+    def lab_kill(request: LabJobRequest):
+        try:
+            job = registry.get(request.job)
+        except (KeyError, FileNotFoundError):
+            raise HTTPException(404, "no such job") from None
+        if job.get("mode") != "lab" or job["state"] != "running":
+            raise HTTPException(409, f"{request.job} is not a running lab job")
+        jobs.cancel(job)
+        rig.refresh()
+        return {"ok": True}
+
+    @app.get("/api/lab/log", response_class=PlainTextResponse)
+    def lab_log(rundir: str):
+        run = known_run(rundir)
+        try:
+            return lab.run_log(config, run["rundir"])
+        except RuntimeError as e:
+            raise HTTPException(502, str(e)) from None
 
     return app
