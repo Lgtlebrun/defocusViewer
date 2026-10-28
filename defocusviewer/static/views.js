@@ -218,6 +218,22 @@ export function range(values, signed) {
   return [lo, hi];
 }
 
+function pairKey(panel) {
+  return ['data', 'model'].includes(panel.q) ? `${panel.space}|${panel.scale}|${panel.scale === 'power' ? panel.p : ''}` : null;
+}
+
+export function pairRanges(panels, ranges) {
+  // Data and model in the same representation get one colour range (the union of theirs), so they compare by eye
+  const union = new Map();
+  panels.forEach((panel, j) => {
+    const key = pairKey(panel), r = ranges[j];
+    if (!key || !r) return;
+    const u = union.get(key);
+    union.set(key, u ? [Math.min(u[0], r[0]), Math.max(u[1], r[1])] : r);
+  });
+  return ranges.map((r, j) => (r && pairKey(panels[j]) ? union.get(pairKey(panels[j])) : r));
+}
+
 function rows2d({ rows, cols, values }) {
   const z = new Array(rows);
   for (let y = 0; y < rows; y++) z[y] = Array.from(values.subarray(y * cols, (y + 1) * cols));

@@ -1,7 +1,7 @@
 // The Compare tab: pinned spots (from any run, kept in this browser) side by side, same views, shared zoom.
 import { h, api, post, q, toast, fmt } from './ui.js';
 import { attachMenu } from './menu.js';
-import { loadOptions, arrays, cells, panelValues, panelLabel, range, heatmap, zoomGroup, zoomKey, viewToggles, saveOptions } from './views.js';
+import { loadOptions, arrays, cells, panelValues, panelLabel, range, pairRanges, heatmap, zoomGroup, zoomKey, viewToggles, saveOptions } from './views.js';
 
 export function pins() {
   try { return JSON.parse(localStorage.getItem('pins') || '[]'); } catch { return []; }
@@ -60,12 +60,13 @@ export async function renderCompare() {
     const panels = cells(options);
     const reference = details[0]?.images ? arrays(details[0]) : null;
     const values = details.map((d) => (d.images ? panels.map((panel) => panelValues(panel, arrays(d), options, d.ghost_box, reference)) : []));
-    const shared = panels.map((_, j) => {
+    const shared = pairRanges(panels, panels.map((_, j) => {
       const all = values.map((row) => row[j]).filter(Boolean);
       if (!all.length) return null;
       const ranges = all.map((v) => range(v.values, v.signed));
       return [Math.min(...ranges.map((r) => r[0])), Math.max(...ranges.map((r) => r[1]))];
-    });
+    }));
+    const ownRanges = values.map((row) => pairRanges(panels, panels.map((_, j) => (row[j] ? range(row[j].values, row[j].signed) : null))));
     const group = zoomGroup();
     const columns = `200px repeat(${panels.length}, minmax(220px, 1fr))`;
     const header = h('div', { style: `display:grid;grid-template-columns:${columns};gap:6px` }, h('div'), panels.map((p) => h('div', { class: 'small muted' }, panelLabel(p))));
@@ -81,7 +82,7 @@ export async function renderCompare() {
         const v = values[i][j];
         if (!v) return h('div', { class: 'panel muted small' }, 'n/a');
         const div = h('div', { class: 'plot', style: 'height:250px' });
-        const own = range(v.values, v.signed);
+        const own = ownRanges[i][j];
         const shownRange = options.sharedRange && !(options.diffFirst && i > 0 && ['data', 'model'].includes(panel.q)) ? shared[j] : own;
         const stem = `${pin.run.split('/').pop()}_${pin.img.replace(/\.npy$/, '')}`;
         toDraw.push(() => heatmap(div, panel, v, shownRange, d.ghost_box, options).then(() => group.add(div, zoomKey(options, panel, i, j))));

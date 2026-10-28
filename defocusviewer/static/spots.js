@@ -1,7 +1,7 @@
 // The Spots subtab: full field of view, filters, timeline and table of the spots on the left, one spot (metadata,
 // fit, images) on the right.
 import { h, api, post, q, toast, fmt, getHash, setHash, cssVar, PLOT_CONFIG } from './ui.js';
-import { QUANTITIES, loadOptions, arrays, panelValues, columnLabel, panelLabel, range, heatmap, zoomGroup, zoomKey, viewToggles } from './views.js';
+import { QUANTITIES, loadOptions, arrays, panelValues, columnLabel, panelLabel, range, pairRanges, heatmap, zoomGroup, zoomKey, viewToggles } from './views.js';
 import { addPin } from './compare.js';
 import { jointFitModal } from './analyses.js';
 import { attachMenu } from './menu.js';
@@ -336,8 +336,9 @@ function drawViews(detail, container) {
   container.replaceChildren(header, ...rows);
   if (!options.rows.length || !options.columns.length) container.append(h('p', { class: 'muted' }, 'Tick a row and add a column above.'));
   const stem = `${table.run.split('/').pop()}_${detail.img.replace(/\.npy$/, '')}`;
-  for (const { panel, values, div, key } of drawn) {
-    const zrange = range(values.values, values.signed);
+  const ranges = pairRanges(drawn.map((d) => d.panel), drawn.map((d) => range(d.values.values, d.values.signed)));
+  for (const [k, { panel, values, div, key }] of drawn.entries()) {
+    const zrange = ranges[k];
     heatmap(div, panel, values, zrange, detail.ghost_box, options).then(() => group.add(div, key));
     attachMenu(div, { panel, values, zrange, ghostBox: detail.ghost_box, options, title: `${stem}: ${panelLabel(panel)}`,
       name: `${stem}_${panel.q}_${panel.space}_${panel.scale}${panel.scale === 'power' ? panel.p : ''}` });
