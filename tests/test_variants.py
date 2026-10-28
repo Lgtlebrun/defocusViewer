@@ -32,3 +32,20 @@ def test_variant_shares_the_data_and_starts_without_analysis(config, rundir):
         variants.create(config, RUN, "../x", "gaussian", "circle", "on")
     with pytest.raises(ValueError):
         variants.create(config, RUN, "x", "gaussian", "square", "on")
+
+
+def test_variant_fit_settings(config, rundir):
+    assert variants.fit_settings(config, RUN) == {"fnum": 4.0, "lbda_range_nm": [600.0, 700.0], "lbda_coarse_step_nm": 5.0}
+    fit = {"fnum": 1.8, "lbda_range_nm": [560, 900], "lbda_coarse_step_nm": 10}
+    key = variants.create(config, RUN, "tophatbl-circle-f1p8", "tophat_bl", "circle", "off", fit)
+    path = catalog.resolve(config, key)
+    settings = catalog.open_rundir(path).loadConfig()["fit"]
+    assert settings["fnum"] == 1.8 and settings["lbda_range_nm"] == [560.0, 900.0] and settings["lbda_coarse_step_nm"] == 10.0
+    assert settings["fix_r"] is True                                            # the rest of the config kept
+    assert json.loads((path / "meta" / "variant.json").read_text())["fit"]["fnum"] == 1.8
+    assert "fit.fnum=1.8" in (path / "log.log").read_text()
+    assert variants.fit_settings(config, key)["lbda_range_nm"] == [560.0, 900.0]
+    for bad in ({"fnum": 0.1}, {"lbda_range_nm": [700, 600]}, {"lbda_range_nm": [200, 600]}, {"zernike_noll": [4, 5]}):
+        with pytest.raises(ValueError):
+            variants.create(config, RUN, "bad", "tophat_bl", "circle", "off", bad)
+    assert not (path.parent / f"{path.name.split('_tophatbl')[0]}_bad").exists()

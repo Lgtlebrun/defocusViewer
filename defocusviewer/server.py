@@ -69,6 +69,7 @@ class VariantRequest(BaseModel):
     source: str = "tophat_bl"
     aperture: str = "hexagon"
     ghost: str = "on"
+    fit: dict = {}                      # fit settings in place of the run's (variants.checked_fit)
     resources: dict = {}
     force: bool = False
 
@@ -429,6 +430,7 @@ def create_app(config: Config, token: str, background: bool = True) -> FastAPI:
         run_path(run)
         free = sampler.free_gpus()
         return {"family": variants.family(config, run), "sources": sorted(fit.SOURCE_MODELS), "apertures": psf.PUPIL_SHAPES,
+                "fit": variants.fit_settings(config, run),
                 "gpu_sources": psf_batch.BATCH_MODELS, "default_resources": jobs.default_resources(config, free, True),
                 "cpu_resources": jobs.default_resources(config, free, False), "free_gpus": free}
 
@@ -439,7 +441,7 @@ def create_app(config: Config, token: str, background: bool = True) -> FastAPI:
         if res["mode"] == "gpu" and request.source not in psf_batch.BATCH_MODELS:
             raise HTTPException(400, f"the GPU fits implement {', '.join(psf_batch.BATCH_MODELS)}: run {request.source} on the CPU")
         try:
-            key = variants.create(config, request.run, request.suffix, request.source, request.aperture, ghost)
+            key = variants.create(config, request.run, request.suffix, request.source, request.aperture, ghost, request.fit)
         except FileExistsError as e:
             raise HTTPException(409, str(e)) from None
         except ValueError as e:

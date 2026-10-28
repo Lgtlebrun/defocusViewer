@@ -176,13 +176,30 @@ async function variantCard(info) {
   const suffix = h('input', { type: 'text', size: 22 });
   let edited = false;
   suffix.oninput = () => { edited = true; };
+  // fit settings in place of the run's: only the changed ones are sent
+  const num = (value, step, size = 6) => h('input', { type: 'number', value, step, size, style: 'width:6em' });
+  const fnum = num(v.fit.fnum, 0.1);
+  const lbdaLo = num(v.fit.lbda_range_nm[0], 10);
+  const lbdaHi = num(v.fit.lbda_range_nm[1], 10);
+  const lbdaStep = num(v.fit.lbda_coarse_step_nm, 1);
+  const fitChanges = () => {
+    const out = {};
+    if (Number(fnum.value) !== v.fit.fnum) out.fnum = Number(fnum.value);
+    if (Number(lbdaLo.value) !== v.fit.lbda_range_nm[0] || Number(lbdaHi.value) !== v.fit.lbda_range_nm[1]) {
+      out.lbda_range_nm = [Number(lbdaLo.value), Number(lbdaHi.value)];
+    }
+    if (Number(lbdaStep.value) !== v.fit.lbda_coarse_step_nm) out.lbda_coarse_step_nm = Number(lbdaStep.value);
+    return out;
+  };
   const editor = resourcesEditor(v.default_resources, v.free_gpus, v.cpu_resources);
   const sync = () => {
-    if (!edited) suffix.value = `${source.value.replace('_', '')}-${aperture.value}`;
+    const f = fitChanges().fnum;
+    if (!edited) suffix.value = `${source.value.replace('_', '')}-${aperture.value}${f ? `-f${String(f).replace('.', 'p')}` : ''}`;
     editor.setMode(v.gpu_sources.includes(source.value) && v.default_resources.mode === 'gpu' ? 'gpu' : 'slurm');
   };
   source.onchange = sync;
   aperture.onchange = sync;
+  fnum.oninput = sync;
   sync();
   const open = (key) => { setHash({ run: key }); window.dispatchEvent(new PopStateEvent('popstate')); };
   const members = v.family.map((m) => h('tr', { class: m.key === info.key ? 'selected' : '' },
@@ -193,11 +210,13 @@ async function variantCard(info) {
     h('p', { class: 'small' }, 'Makes a variant of this run, ', h('span', { class: 'mono' }, `${v.family[0].key.split('/').pop()}_<suffix>`),
       ', that shares its data and asks for another source or aperture model, then runs the whole analysis on it. The results of this run are not touched; pick a variant with the selector at the top of the run.'),
     h('div', { class: 'row' }, 'source ', source, ' aperture ', aperture, ghost, ' suffix ', suffix),
+    h('div', { class: 'row', title: 'The pupil radius goes as 1 / (lambda x f-number): the wavelength fit absorbs a working f-number off the nominal one, as long as the lambda range is wide enough. Change these when the iris was moved and the run\'s config kept the old f-number.' },
+      'f-number ', fnum, ' lambda range ', lbdaLo, '-', lbdaHi, ' nm, coarse step ', lbdaStep, ' nm'),
     h('div', { style: 'margin:6px 0' }, editor.el),
     h('div', { class: 'row' }, h('span', { class: 'spacer' }), h('button', { class: 'primary', onclick: async () => {
       try {
         const out = await post('/api/variants', { run: info.key, suffix: suffix.value.trim(), source: source.value, aperture: aperture.value,
-          ghost: ghost.value, resources: editor.value() });
+          ghost: ghost.value, fit: fitChanges(), resources: editor.value() });
         toast(`Variant ${out.variant.split('/').pop()} created, job ${out.job.id} started: ${out.job.label}`);
         window.dispatchEvent(new Event('runschange'));
         open(out.variant);

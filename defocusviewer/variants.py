@@ -19,6 +19,11 @@ ACQUISITION_RESULTS = ("equalizer_", "fiber_label_map", "labeled_fiber_centers",
 ACQUISITION_PLOTS = ("spots_centers.pdf", "example_spots")
 PROVENANCE = "variant.json"
 SUFFIX = re.compile(r"^[A-Za-z0-9][\w-]{0,40}$")
+# fit settings a variant may change, with their allowed ranges; the pupil radius goes as 1 / (lambda * fnum), so a wide
+# lambda range lets the joint fit absorb the working f-number of an iris set by hand
+FIT_LIMITS = {"fnum": (0.5, 32.0), "lbda_coarse_step_nm": (0.5, 50.0)}
+LBDA_LIMITS = (300.0, 1100.0)
+FIT_DEFAULTS = {"fnum": 8.0, "lbda_range_nm": [600.0, 700.0], "lbda_coarse_step_nm": 5.0}
 
 
 def family(config: Config, key: str) -> list[dict]:
@@ -62,12 +67,44 @@ def model_name(source: str, aperture: str) -> str:
     return source if aperture == "hexagon" else f"{source}@{aperture}"
 
 
-def create(config: Config, key: str, suffix: str, source: str, aperture: str, ghost: str) -> str:
-    """Creates the variant `<run>_<suffix>` of the run of `key` asking for `source` and `aperture`; returns its key.
-    ValueError for a bad suffix or model, FileExistsError when that variant exists."""
+def fit_settings(config: Config, key: str) -> dict:
+    """The fit settings of run `key` a variant may change (FIT_DEFAULTS where its config has none)."""
+    path = catalog.resolve(config, key)
+    fit_config = (catalog.open_rundir(path).loadConfig().get("fit") or {}) if (path / "meta" / "config.yaml").exists() else {}
+    out = {}
+    for name, default in FIT_DEFAULTS.items():
+        value = fit_config.get(name, default)
+        out[name] = [float(v) for v in value] if isinstance(default, list) else float(value)
+    return out
+
+
+def checked_fit(fit: dict | None) -> dict:
+    """The fit settings of a variant request ({} when none), ValueError for an unknown setting or a value out of range."""
+    out = {}
+    for name, value in (fit or {}).items():
+        if name == "lbda_range_nm":
+            lo, hi = (float(v) for v in value)
+            if not LBDA_LIMITS[0] <= lo < hi <= LBDA_LIMITS[1]:
+                raise ValueError(f"lbda_range_nm: increasing pair within {LBDA_LIMITS[0]:g}-{LBDA_LIMITS[1]:g} nm")
+            out[name] = [lo, hi]
+        elif name in FIT_LIMITS:
+            lo, hi = FIT_LIMITS[name]
+            if not lo <= float(value) <= hi:
+                raise ValueError(f"{name}: within {lo:g}-{hi:g}")
+            out[name] = float(value)
+        else:
+            raise ValueError(f"fit settings a variant may change: {', '.join(['lbda_range_nm', *FIT_LIMITS])}")
+    return out
+
+
+def create(config: Config, key: str, suffix: str, source: str, aperture: str, ghost: str, fit: dict | None = None) -> str:
+    """Creates the variant `<run>_<suffix>` of the run of `key` asking for `source` and `aperture`, and the fit settings
+    `fit` (see checked_fit) in place of the run's; returns its key. ValueError for a bad suffix, model or setting,
+    FileExistsError when that variant exists."""
     if not SUFFIX.match(suffix):
         raise ValueError("suffix: letters, digits, '-' and '_', at most 41 characters")
     model = model_name(source, aperture)
+    fit = checked_fit(fit)
     root = parent(config, key) or key
     path = catalog.resolve(config, root)
     target = path.parent / f"{path.name}_{suffix}"
@@ -83,9 +120,10 @@ def create(config: Config, key: str, suffix: str, source: str, aperture: str, gh
         settings.setdefault("fit", {})
         settings["fit"]["model"] = model
         settings["fit"]["ghost_mask"] = ghost == "on"
+        settings["fit"].update(fit)
         (target / "meta" / "config.yaml").write_text(yaml.safe_dump(_plain(settings), sort_keys=False))
         (target / "meta" / PROVENANCE).write_text(json.dumps({
-            "parent": root, "model": model, "source": source, "aperture": aperture, "ghost": ghost,
+            "parent": root, "model": model, "source": source, "aperture": aperture, "ghost": ghost, "fit": fit,
             "parent_model": model_of(path), "made": datetime.now().isoformat(timespec="seconds")}, indent=1))
         (target / "results").mkdir()
         for file in (path / "results").iterdir():
@@ -98,7 +136,7 @@ def create(config: Config, key: str, suffix: str, source: str, aperture: str, gh
                 shutil.copytree(item, target / "plot" / name)
             elif item.exists():
                 shutil.copy2(item, target / "plot" / name)
-        _copy_acquisition_log(path / "log.log", target / "log.log", root, model)
+        _copy_acquisition_log(path / "log.log", target / "log.log", root, model, fit)
     except Exception:
         shutil.rmtree(target, ignore_errors=True)
         raise
@@ -120,7 +158,7 @@ def _plain(value):
     return value
 
 
-def _copy_acquisition_log(source: Path, target: Path, root: str, model: str) -> None:
+def _copy_acquisition_log(source: Path, target: Path, root: str, model: str, fit: dict) -> None:
     """The acquisition part of the run's log.log (up to its first analysis), then a line saying what the variant is."""
     lines = []
     if source.exists():
@@ -129,5 +167,6 @@ def _copy_acquisition_log(source: Path, target: Path, root: str, model: str) -> 
                 break
             lines.append(line)
     stamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    lines.append(f"({stamp}) [INFO] [defocusViewer] : variant of {root.rsplit('/', 1)[-1]} with fit.model={model}\n")
+    changed = "".join(f", fit.{k}={v}" for k, v in fit.items())
+    lines.append(f"({stamp}) [INFO] [defocusViewer] : variant of {root.rsplit('/', 1)[-1]} with fit.model={model}{changed}\n")
     target.write_text("".join(lines))
