@@ -23,7 +23,7 @@ from DefocusTest import fit, psf
 from DefocusTest.analysis.SpotLabeler import drop_overwritten_images, load_labeled_dataframe, load_labeled_result_df
 from DefocusTest.analysis.ZernikeStabilityAnalysis import load_crop_side
 from DefocusTest.devices import DESI, FIDUCIALS
-from DefocusTest.imgDF import imgDF, load_stack
+from DefocusTest.imgDF import STACK_SEP, imgDF, load_stack
 from DefocusTest.postprocessing import GHOST_MASKS, GhostMasks, detect_frames, fiber_ghost_table
 
 from . import catalog
@@ -151,7 +151,7 @@ def options(config: Config, key: str) -> dict:
     return {"fnum": fnum if fnum is not None else (refs[0]["fnum"] if refs else None),
             "fnum_source": source if fnum is not None else ("reference" if refs else "unknown"), "references": refs,
             "n_images": len(df), "fibers": sorted(df["fiber"].unique()), "matched": matched,
-            "image_side": int(np.load(path / "data" / df["img"].iloc[0], mmap_mode="r").shape[0]) if len(df) else None,
+            "image_side": int(np.load(path / "data" / df["img"].iloc[0].split(STACK_SEP)[0], mmap_mode="r").shape[0]) if len(df) else None,
             "has_x_position": bool((df["x_position"] != 1).any()), "default_mode": "seeded" if refs else "scratch",
             "default_pupil_shape": "circle" if "circular" in path.name else "hexagon",
             "existing": json.loads(provenance.read_text()) if provenance.exists() else None,
@@ -221,7 +221,7 @@ def reuse(config: Config, key: str, reference: str, fnum: float, pupil_shape: st
     settings = _with_pupil(reference_settings(catalog.resolve(config, reference)), pupil_shape)
     df = spot_table(path)
     lbda_nm, matched = _lbda_start(df, settings)
-    k = min(settings["crop_side"], int(np.load(path / "data" / df["img"].iloc[0], mmap_mode="r").shape[0]))
+    k = min(settings["crop_side"], int(np.load(path / "data" / df["img"].iloc[0].split(STACK_SEP)[0], mmap_mode="r").shape[0]))
     provenance = {"mode": "reuse", "reference": reference, "matched": matched, "fnum": fnum, "theta": settings["theta"],
                   "pupil_shape": pupil_shape, "made": datetime.now().isoformat(timespec="seconds")}
     for stale in ("joint_fit_diag_records", "joint_fit_diag_records_unmasked", "joint_fit_history", "r_lines", GHOST_MASKS):

@@ -10,6 +10,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 from DefocusTest.analysis.SpotLabeler import drop_overwritten_images, load_labeled_dataframe, load_labeled_result_df
+from DefocusTest.imgDF import STACK_SEP
 from DefocusTest.psf import split_model
 
 from . import catalog
@@ -154,7 +155,7 @@ def _camera_section(path, config, df) -> dict:
     if _get(config, "equalizer", "target_intensity"):
         rows.append(["equalizer target", f"{_get(config, 'equalizer', 'target_intensity')} counts"])
     if len(df):
-        image = np.load(path / "data" / df["img"].iloc[0], mmap_mode="r")
+        image = np.load(path / "data" / df["img"].iloc[0].split(STACK_SEP)[0], mmap_mode="r")
         rows.append(["stored crop", f"{image.shape[0]} px"])
     if camera.get("work_crop_side"):
         rows.append(["working crop", f"{camera['work_crop_side']} px"])
