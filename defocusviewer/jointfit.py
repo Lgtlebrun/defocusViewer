@@ -284,10 +284,11 @@ def run(config: Config, key: str, mode: str, reference: str | None, fnum: float,
     if ghost == "on":
         rundir.saveResultDf(diag, "joint_fit_diag_records_unmasked")
         frames, residuals = _residuals(images, diag, theta, scales, settings, fnum, k)
-        table = fiber_ghost_table(frames, detect_frames(residuals), k, fnum)
+        table = fiber_ghost_table(frames, detect_frames(residuals), k, fnum, residuals=residuals)
         rundir.saveResultDf(table, GHOST_MASKS)
-        log("ghost boxes: " + ", ".join(f"{r.fiber} ({r.gx:.1f}, {r.gy:.1f}) found {r.n_found}/{r.n_frames}"
-                                        for r in table.itertuples()))
+        log("ghost boxes: " + (", ".join(f"{r.fiber} ({r.gx:.1f}, {r.gy:.1f}) {r.box_w} x {r.box_h} px, found at the same "
+                                         f"place in {r.n_agree}/{r.n_frames}" for r in table.itertuples() if r.masked)
+                               or "none"))
         masked = dict(lbda_center_init={f: fit.DEFAULT_LBDA * 1e9 / s for f, s in scales.items()},
                       **({"theta_center_init": theta} if (fit_theta or mode == "scratch") and not circle
                          else {"theta_fixed": theta}))

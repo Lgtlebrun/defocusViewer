@@ -57,6 +57,10 @@ def test_rendered_residual_matches_the_saved_fit(source):
         detail = spots.detail(REAL_RUN, img, saved["ghost"])
         assert detail["fit"]["source"] == source
         assert detail["residual_frac"] == pytest.approx(saved["residual_frac"], rel=1e-9)
+        # the box shown is the one this fit masked: none for an unmasked fit, the run's box for a masked one
+        run_box = st.ghost_box(detail["fiber"], st.image(img).shape)
+        assert detail["ghost_box"] == (run_box if saved["ghost"] == "on" else None)
+        assert detail["ghost_box_source"] == (None if detail["ghost_box"] is None else "run")
 
 
 @pytest.mark.skipif(not REAL_RUN.exists(), reason="needs the stability-fnum4-2 rundir")
@@ -77,11 +81,12 @@ FNUM4 = REAL_RUN.parent / "20261015-161039_stability-fnum4"
 @pytest.mark.skipif(not (BASELINE.exists() and (FNUM4 / "results" / "ghost_masks.hdf5").exists()),
                     reason="needs the fnum4 rundir, its ghost masks and its A-baseline copy")
 def test_fiber_ghost_matches_the_pipeline_masks():
-    """The viewer's ghost hunt on a run without masks lands on the boxes GhostMaskAnalysis found on the same data."""
+    """The viewer's ghost hunt on a run without masks finds the ghosts GhostMaskAnalysis found on the same data, and sizes
+    a box that covers the ghost centre."""
     from DefocusTest.postprocessing import GhostMasks
     st = spots.state(BASELINE)
-    pipeline = GhostMasks.load(spots.state(FNUM4).rundir)
+    pipeline = GhostMasks.load(spots.state(FNUM4).rundir).table
     for fiber in ("Fa", "Fc", "pos_1"):
         box = spots.fiber_ghost(st, fiber, (121, 121), n_spots=5)
-        assert abs(box["x0"] - pipeline.box(fiber, (121, 121))[0]) <= 1
-        assert abs(box["y0"] - pipeline.box(fiber, (121, 121))[1]) <= 1
+        assert abs(box["gx"] - pipeline.loc[fiber, "gx"]) <= 0.5 and abs(box["gy"] - pipeline.loc[fiber, "gy"]) <= 0.5
+        assert box["x0"] < box["gx"] < box["x0"] + box["w"] - 1 and box["y0"] < box["gy"] < box["y0"] + box["h"] - 1

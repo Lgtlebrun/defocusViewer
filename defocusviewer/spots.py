@@ -19,7 +19,7 @@ from DefocusTest.analysis.SpotLabeler import drop_overwritten_images, load_label
 from DefocusTest.analysis.ZernikeStabilityAnalysis import _fit_candidate, load_crop_side, load_fnum, load_pupil_scale
 from DefocusTest.devices import DESI
 from DefocusTest.imgDF import load_stack
-from DefocusTest.postprocessing import GhostMasks, box_corner, box_side, detect_ghost
+from DefocusTest.postprocessing import GhostMasks, detect_frames, fiber_ghost_table
 from PIL import Image
 from posUtils.define import UMperCOUNT
 
@@ -141,14 +141,14 @@ class RunState:
                     "residual_frac": float(row.get("residual_frac", np.nan)), "sigma_c4": float(row.get("sigma_c4", np.nan))})
 
     def ghost_box(self, fiber: str, shape) -> dict | None:
-        """{x0, y0, side, gx, gy} of the fiber in the run's ghost masks, None when the run has none for it."""
+        """{x0, y0, w, h, gx, gy} of the fiber in the run's ghost masks, None when the run masks nothing on it."""
         if self.masks is None or fiber == DESI:
             return None
         box = self.masks.box(fiber, shape)
         if box is None:
             return None
         row = self.masks.table.loc[fiber]
-        return {"x0": box[0], "y0": box[1], "side": box[2], "gx": float(row["gx"]), "gy": float(row["gy"])}
+        return _box_dict(box, (row["gx"], row["gy"]))
 
     def stamp(self) -> dict:
         """Mtimes a viewer fit depends on: it is stale when one changes."""
@@ -246,8 +246,17 @@ def load_viewer_fit(folder: Path | None, img: str, ghost: str, st: RunState) -> 
 
 
 def box_weights(shape, box: dict | None):
-    """Weights with 0 in a ghost box {x0, y0, side} (as the masked fits use them), None without a box."""
-    return None if box is None else fit.ghost_box_weights(shape, (box["x0"], box["y0"], box["side"]))
+    """Weights with 0 in a ghost box {x0, y0, w, h} (as the masked fits use them; a cached {x0, y0, side} is a square), None
+    without a box."""
+    if box is None:
+        return None
+    return fit.ghost_box_weights(shape, (box["x0"], box["y0"], box.get("w", box.get("side")), box.get("h", box.get("side"))))
+
+
+def _box_dict(box, centre, **extra) -> dict:
+    """{x0, y0, w, h, gx, gy, ...} of a box (x0, y0, w, h) (postprocessing.GhostMasks.box) on a ghost centred at `centre`."""
+    x0, y0, w, h = (int(v) for v in box)
+    return {"x0": x0, "y0": y0, "w": w, "h": h, "gx": float(centre[0]), "gy": float(centre[1]), **extra}
 
 
 def detail(path: Path, img: str, ghost: str, viewer_fits: Path | None = None) -> dict:
@@ -274,11 +283,18 @@ def detail(path: Path, img: str, ghost: str, viewer_fits: Path | None = None) ->
     chosen = next((f for f in saved if f["ghost"] == ghost), None)
     viewer = load_viewer_fit(viewer_fits, img, ghost, st)
     shown = chosen or (dict(viewer, source="viewer fit") if viewer else None)
+    # the box shown is the one the shown fit masked: none for an unmasked fit, the run's box for a pipeline fit of a fiber
+    # the pipeline masked, the viewer fit's own box (cached with it) for a viewer fit; before any fit, the run's box
     run_box = st.ghost_box(fiber, image.shape)
-    box = run_box or (shown or {}).get("ghost_box")
-    weights = box_weights(image.shape, box) if ghost == "on" else None
+    if ghost == "off":
+        box = None
+    elif chosen is not None or shown is None:
+        box = run_box
+    else:
+        box = shown.get("ghost_box")
+    weights = box_weights(image.shape, box)
     out = {"img": img, "fiber": fiber, "meta": meta, "saved": saved, "viewer_fit": viewer, "fit": shown, "ghost": ghost,
-           "ghost_box": box, "ghost_box_source": "run" if run_box else "spot" if box else None,
+           "ghost_box": box, "ghost_box_source": None if box is None else "run" if box == run_box else "spot",
            "ghost_found": (shown or {}).get("ghost_found"), "ghost_masks": st.masks is not None, "joint_fit": st.joint,
            "needs": None if shown else "joint_fit" if not st.joint else "refit", "images": {"data": _b64(image)}}
     if shown and st.joint and fiber != DESI:
@@ -310,17 +326,22 @@ def render(st: RunState, fiber: str, image: np.ndarray, params, noll, weights) -
         weights=weights)
 
 
-def _ghost_box_at(xy, fnum, **extra) -> dict:
-    side = box_side(fnum)
-    x0, y0 = box_corner(xy, side)
-    return {"x0": x0, "y0": y0, "side": side, "gx": float(xy[0]), "gy": float(xy[1]), **extra}
+def _hunt(fiber: str, residuals, images, k: int, fnum: float, found_on: str) -> dict | None:
+    """The box GhostMaskAnalysis would give `fiber` from these residuals (model - data) of its spots: the same detection,
+    per-fiber rule and box sizing (postprocessing.detect_frames / fiber_ghost_table); None when it masks nothing."""
+    frames = pd.DataFrame({"fiber": [fiber] * len(residuals)})
+    row = fiber_ghost_table(frames, detect_frames(residuals, images), k, fnum, residuals=residuals).iloc[0]
+    if not row["masked"]:
+        return None
+    return _box_dict((row["box_x0"], row["box_y0"], row["box_w"], row["box_h"]), (row["gx"], row["gy"]),
+                     found_on=f"{found_on} ({int(row['n_agree'])} of {int(row['n_frames'])} at the same place)")
 
 
 def fiber_ghost(st: RunState, fiber: str, shape, n_spots: int = 9) -> dict | None:
     """The fiber's ghost box as GhostMaskAnalysis finds it for a run, on up to `n_spots` of the fiber's unmasked saved
-    fits (train spots first, spread over the sweep): detect_ghost on each residual, the median centre of the detections.
-    None when the fiber has no unmasked saved fit, or no residual shows a ghost. The ghost sits at a fixed pixel, so the
-    box applies to every spot of the fiber (on a hold frame the most negative residual is often something else)."""
+    fits (train spots first, spread over the sweep): the residuals of those fits through the pipeline's detection and
+    per-fiber rule, the box sized on their mean excess. None when the fiber has no unmasked saved fit, or the rule finds
+    no ghost. The ghost sits at a fixed pixel, so the box applies to every spot of the fiber."""
     key = (fiber, tuple(shape))
     if key not in st.fiber_ghosts:
         candidates = [img for img, fits in st.fits.items() if img in st.df.index and st.df.loc[img, "fiber"] == fiber
@@ -328,15 +349,14 @@ def fiber_ghost(st: RunState, fiber: str, shape, n_spots: int = 9) -> dict | Non
         candidates.sort(key=lambda img: (st.df.loc[img, "routine"] not in ("train", "train2"), img))
         train = [img for img in candidates if st.df.loc[img, "routine"] in ("train", "train2")] or candidates
         picked = [train[i] for i in np.unique(np.linspace(0, len(train) - 1, min(n_spots, len(train))).round().astype(int))] if train else []
-        centres = []
+        residuals, images = [], []
         for img in picked:
             unmasked = next(f for f in st.fits[img] if f["ghost"] == "off")
             image = st.image(img)
-            found = detect_ghost(render(st, fiber, image, unmasked["params"], unmasked["noll"], None) - image)["xy"]
-            if found is not None:
-                centres.append(found)
-        st.fiber_ghosts[key] = (_ghost_box_at(np.median(centres, axis=0), st.fnum, found_on=f"{len(centres)} of {len(picked)} spots of {fiber}")
-                                if centres else None)
+            residuals.append(render(st, fiber, image, unmasked["params"], unmasked["noll"], None) - image)
+            images.append(image)
+        st.fiber_ghosts[key] = (_hunt(fiber, residuals, images, shape[0], st.fnum, f"{len(picked)} spots of {fiber}")
+                                if picked else None)
     return st.fiber_ghosts[key]
 
 
@@ -360,7 +380,8 @@ def refit(path: Path, img: str, ghost: str, folder: Path, map_function=map) -> d
     (e.g. a process pool's map); caches the result in `folder`.
 
     ghost "on" without a mask of the run for the fiber hunts the ghost as GhostMaskAnalysis does (fiber_ghost; on this
-    spot alone when the fiber has no unmasked saved fit), then fits with weight 0 on the box round(32 / fnum) px."""
+    spot alone when the fiber has no unmasked saved fit), then fits with weight 0 on the box sized to the ghost; with
+    the run's mask, on the run's box. The box the fit used is cached with it (ghost_box, None when nothing was masked)."""
     st = state(path)
     row = st.df.loc[img]
     fiber, routine = str(row["fiber"]), str(row["routine"])
@@ -375,14 +396,15 @@ def refit(path: Path, img: str, ghost: str, folder: Path, map_function=map) -> d
     if ghost == "off" or run_box is not None:
         box = run_box if ghost == "on" else None
         out = _fit_spot(st, fiber, image, noll, r_fixed, seeds, box_weights(image.shape, box), map_function)
+        out.update(ghost_box=box)
     else:
         box = fiber_ghost(st, fiber, image.shape)
         unmasked = None
         if box is None:       # no unmasked saved fit of the fiber: look on this spot alone
             unmasked = (next((f for f in st.fits.get(img, []) if f["ghost"] == "off"), None)
                         or load_viewer_fit(folder, img, "off", st) or refit(path, img, "off", folder, map_function))
-            found = detect_ghost(render(st, fiber, image, unmasked["params"], unmasked["noll"], None) - image)["xy"]
-            box = None if found is None else _ghost_box_at(found, st.fnum, found_on="this spot")
+            residual = render(st, fiber, image, unmasked["params"], unmasked["noll"], None) - image
+            box = _hunt(fiber, [residual], [image], image.shape[0], st.fnum, "this spot")
         if box is None:
             out = {k: unmasked[k] for k in ("noll", "params", "cost", "residual_frac", "r_fixed", "n_seeds") if k in unmasked}
             out.update(ghost_found=False, ghost_box=None)

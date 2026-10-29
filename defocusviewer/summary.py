@@ -219,8 +219,9 @@ def _results(path, rundir) -> dict:
     try:
         masks = load_labeled_result_df(rundir, "ghost_masks")
         found = masks[masks["masked"]]
-        rows.append(["ghost boxes", f"{len(found)} of {len(masks)} fibers, {int(masks['side'].iloc[0])} px, centred at "
-                                    + ", ".join(f"{r.fiber} ({r.gx:.0f}, {r.gy:.0f})" for r in found.itertuples())])
+        size = lambda r: f"{int(getattr(r, 'box_w', r.side))} x {int(getattr(r, 'box_h', r.side))} px"
+        rows.append(["ghost boxes", f"{len(found)} of {len(masks)} fibers"
+                     + "".join(f", {r.fiber} at ({r.gx:.0f}, {r.gy:.0f}) {size(r)}" for r in found.itertuples())])
     except (FileNotFoundError, OSError, KeyError):
         pass
     try:

@@ -59,8 +59,8 @@ def _panel_pdf(panel: dict) -> bytes:
     fig.colorbar(image, ax=ax, label=panel.get("colorbar_label", ""))
     box = panel.get("ghost_box")
     if box:
-        ax.add_patch(Rectangle((box["x0"] - 0.5, box["y0"] - 0.5), box["side"], box["side"], fill=False, ec="#d03b3b", lw=0.8,
-                               ls=":"))
+        w, h = box.get("w", box.get("side")), box.get("h", box.get("side"))
+        ax.add_patch(Rectangle((box["x0"] - 0.5, box["y0"] - 0.5), w, h, fill=False, ec="#d03b3b", lw=0.8, ls=":"))
     ax.set_title(panel.get("title", ""), fontsize=6)
     ax.set_xlabel(panel.get("xlabel", "x (px)"))
     ax.set_ylabel(panel.get("ylabel", "y (px)"))

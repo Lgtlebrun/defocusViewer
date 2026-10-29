@@ -1,7 +1,7 @@
 // The Spots subtab: full field of view, filters, timeline and table of the spots on the left, one spot (metadata,
 // fit, images) on the right.
 import { h, api, post, q, toast, fmt, getHash, setHash, cssVar, PLOT_CONFIG } from './ui.js';
-import { QUANTITIES, loadOptions, arrays, panelValues, columnLabel, panelLabel, range, pairRanges, heatmap, zoomGroup, zoomKey, viewToggles } from './views.js';
+import { QUANTITIES, loadOptions, arrays, panelValues, columnLabel, panelLabel, range, pairRanges, heatmap, zoomGroup, zoomKey, viewToggles, boxW, boxH } from './views.js';
 import { addPin } from './compare.js';
 import { jointFitModal } from './analyses.js';
 import { attachMenu } from './menu.js';
@@ -267,7 +267,7 @@ function metadata(detail) {
     ['spot centre (sensor px)', detail.absolute_center ? detail.absolute_center.map((v) => v.toFixed(2)).join(', ') : 'needs a fit'],
     ['crop side', `${m.crop_side} px`], ['device', m.device], ['image', detail.img],
     ['pupil scale', detail.pupil_scale !== undefined ? fmt(detail.pupil_scale, 5) : ''],
-    ['ghost box', detail.ghost_box ? `x ${detail.ghost_box.x0}, y ${detail.ghost_box.y0}, side ${detail.ghost_box.side} px` : 'none'],
+    ['ghost box', detail.ghost_box ? `x ${detail.ghost_box.x0}, y ${detail.ghost_box.y0}, ${boxW(detail.ghost_box)} x ${boxH(detail.ghost_box)} px` : 'none (nothing masked)'],
     ['fit available', detail.saved.length ? detail.saved.map((f) => `${f.source} (ghost ${f.ghost})`).join('; ') : 'no pipeline fit'],
   ];
   return h('dl', { class: 'kv' }, rows.map(([k, v]) => [h('dt', {}, k), h('dd', {}, v ?? '')]));

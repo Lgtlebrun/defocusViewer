@@ -148,8 +148,12 @@ function maxAbs(values) {
   return m;
 }
 
+// a ghost box is {x0, y0, w, h}; viewer fits cached before the boxes were sized have a square {x0, y0, side}
+export const boxW = (box) => box.w ?? box.side;
+export const boxH = (box) => box.h ?? box.side;
+
 function inBox(box, x, y) {
-  return box && x >= box.x0 && x < box.x0 + box.side && y >= box.y0 && y < box.y0 + box.side;
+  return box && x >= box.x0 && x < box.x0 + boxW(box) && y >= box.y0 && y < box.y0 + boxH(box);
 }
 
 export function columnLabel(column) {
@@ -286,8 +290,8 @@ export function heatmap(div, panel, values, zrange, ghostBox, options) {
   if (values.coords) { trace.x = values.coords; trace.y = values.coords; }
   const shapes = [], extra = [];
   if (options.showGhost && ghostBox && panel.space === 'image' && QUANTITIES[panel.q].ghost) {
-    shapes.push({ type: 'rect', x0: ghostBox.x0 - 0.5, x1: ghostBox.x0 + ghostBox.side - 0.5, y0: ghostBox.y0 - 0.5,
-      y1: ghostBox.y0 + ghostBox.side - 0.5, line: { color: '#d03b3b', width: 1.5, dash: 'dot' } });
+    shapes.push({ type: 'rect', x0: ghostBox.x0 - 0.5, x1: ghostBox.x0 + boxW(ghostBox) - 0.5, y0: ghostBox.y0 - 0.5,
+      y1: ghostBox.y0 + boxH(ghostBox) - 0.5, line: { color: '#d03b3b', width: 1.5, dash: 'dot' } });
     if (ghostBox.gx !== undefined) {
       extra.push({ type: 'scatter', mode: 'markers', x: [ghostBox.gx], y: [ghostBox.gy], showlegend: false,
         marker: { symbol: 'x-thin', size: 9, line: { width: 2, color: '#d03b3b' } }, hovertemplate: 'ghost centre %{x:.1f}, %{y:.1f}<extra></extra>' });
