@@ -24,10 +24,10 @@ class Config:
     state_dir: Path = Path("/disk/users/llebru/defocusViewer")
     cache_dir: Path = Path("/scratch/llebru/defocusViewer")
     python: str = sys.executable
-    gpu_hosts: list = field(default_factory=lambda: ["farm-gpu5", "farm-gpu1", "farm-gpu6"])
-    # hosts a job takes GPUs from by default, in order; farm-gpu6 (one of its two Blackwells at a time, GPU_HOST_LIMITS)
-    # was left out 2026-10-22 to 2026-10-24 while its CUDA failed (cudaErrorUnknown)
-    job_gpu_hosts: list = field(default_factory=lambda: ["farm-gpu5", "farm-gpu1", "farm-gpu6"])
+    # GPUs of farm-gpu3-6 are off limits for us since 2026-10-29 (their cores stay usable: launch_hosts keeps farm-gpu5)
+    gpu_hosts: list = field(default_factory=lambda: ["farm-gpu1"])
+    # hosts a job takes GPUs from by default, in order
+    job_gpu_hosts: list = field(default_factory=lambda: ["farm-gpu1"])
     launch_hosts: list = field(default_factory=lambda: ["farm-gpu1", "farm-gpu5"])
     gpus_per_job: int = 2
     gpu_job_cpu_workers: int = 4
