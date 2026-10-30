@@ -1,3 +1,4 @@
+from pathlib import Path
 import numpy as np
 import pytest
 
@@ -90,3 +91,16 @@ def test_fiber_ghost_matches_the_pipeline_masks():
         box = spots.fiber_ghost(st, fiber, (121, 121), n_spots=5)
         assert abs(box["gx"] - pipeline.loc[fiber, "gx"]) <= 0.5 and abs(box["gy"] - pipeline.loc[fiber, "gy"]) <= 0.5
         assert box["x0"] < box["gx"] < box["x0"] + box["w"] - 1 and box["y0"] < box["gy"] < box["y0"] + box["h"] - 1
+
+
+DESI_RUN = Path("/disk/users/llebru/Defocus/MPS6/Defocus/20261029-174520_stability-mount-fnummin_tophatbl-circle-accel")
+
+
+@pytest.mark.skipif(not DESI_RUN.exists(), reason="needs the MPS6 f/1.8 -accel rundir")
+def test_desi_spot_is_not_refitted():
+    """DESI (a 5-spot pattern) never asks for the single-spot viewer refit; the note says why there is no model."""
+    st = spots.state(DESI_RUN)
+    img = next(i for i in st.df.index if st.df.loc[i, "fiber"] == spots.DESI)
+    detail = spots.detail(DESI_RUN, img, "on")
+    assert detail["needs"] == "desi" and detail["fit"] is None
+    assert detail["desi_note"].startswith("DESI is not fitted in this run")

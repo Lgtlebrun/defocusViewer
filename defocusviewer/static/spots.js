@@ -232,6 +232,7 @@ function fitBanner(detail) {
     return h('div', { class: 'banner warn' }, 'No joint fit on this run yet: theta and the pupil scales it fits are needed to model any spot. ',
       h('button', { class: 'primary', onclick: () => jointFitModal(table.info, ghostSetting()) }, 'Run the joint fit…'));
   }
+  if (detail.needs === 'desi') return h('div', { class: 'banner warn' }, detail.desi_note);
   if (detail.needs === 'refit') {
     const hunt = detail.ghost === 'on' && !detail.ghost_box ? ' The ghost box is found first, from the unmasked fits of this fiber.' : '';
     return h('div', { class: 'banner' }, h('span', { class: 'spinner' }), ` No saved fit of this spot with the ghost mask ${detail.ghost}: fitting it now with the joint fit's theta and pupil scale (a few seconds).${hunt}`);

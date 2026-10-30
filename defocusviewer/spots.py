@@ -296,7 +296,10 @@ def detail(path: Path, img: str, ghost: str, viewer_fits: Path | None = None) ->
     out = {"img": img, "fiber": fiber, "meta": meta, "saved": saved, "viewer_fit": viewer, "fit": shown, "ghost": ghost,
            "ghost_box": box, "ghost_box_source": None if box is None else "run" if box == run_box else "spot",
            "ghost_found": (shown or {}).get("ghost_found"), "ghost_masks": st.masks is not None, "joint_fit": st.joint,
-           "needs": None if shown else "joint_fit" if not st.joint else "refit", "images": {"data": _b64(image)}}
+           "needs": None if shown else "joint_fit" if not st.joint else "desi" if fiber == DESI else "refit",
+           "images": {"data": _b64(image)}}
+    if fiber == DESI:
+        out["desi_note"] = desi_note(path)
     if shown and st.joint and fiber != DESI:
         model = render(st, fiber, image, shown["params"], shown["noll"], weights)
         residual = model - image
@@ -306,6 +309,15 @@ def detail(path: Path, img: str, ghost: str, viewer_fits: Path | None = None) ->
         out["pupil_scale"] = load_pupil_scale(st.rundir, fiber)
         out["absolute_center"] = [meta["mom_center_x"] + shown["params"][1], meta["mom_center_y"] + shown["params"][2]]
     return out
+
+
+def desi_note(path: Path) -> str:
+    """Why the viewer shows no model of a DESI spot: DESI is fitted as a pattern of 5 spots by the pipeline's DESI fit
+    (DesiAnalysis), which the single-spot viewer fit cannot redo, and the viewer does not draw that pattern yet."""
+    if not (path / "results" / "desi_pattern.npz").exists():
+        return ("DESI is not fitted in this run (no desi_pattern in results/: the DESI fit failed or did not run, see "
+                "DesiFitAnalysis in log.log). DESI is a pattern of 5 spots, which the viewer's single-spot fit cannot model.")
+    return "DESI is fitted by the pipeline as a pattern of 5 spots; the viewer does not draw that model yet."
 
 
 def residual_frac(residual, image, weights, joint: bool) -> float:
