@@ -19,8 +19,13 @@ export async function renderJobs() {
   const root = document.getElementById('tab-jobs');
   const jobs = await api('/api/jobs');
   const selected = getHash().job || jobs[0]?.id;
-  const logBox = h('pre', { style: 'max-height:55vh;min-height:200px' }, '');
   const job = jobs.find((j) => j.id === selected);
+  const logText = job ? await api(`/api/jobs/${job.id}/log`) || '(no output yet)' : '';
+  // The refresh rebuilds the tab: keep the log's and the table's scroll unless the log was followed at its end.
+  const oldLog = root.querySelector('pre.job-log'), oldTable = root.querySelector('.table-wrap');
+  const keepLog = oldLog && oldLog.dataset.job === selected && oldLog.scrollHeight - oldLog.scrollTop - oldLog.clientHeight > 4;
+  const logTop = oldLog?.scrollTop, tableTop = oldTable?.scrollTop;
+  const logBox = h('pre', { class: 'job-log', 'data-job': selected, style: 'max-height:55vh;min-height:200px' }, logText);
   const rows = jobs.map((j) => h('tr', { class: j.id === selected ? 'selected' : '', onclick: () => { setHash({ job: j.id }, true); renderJobs(); } },
     h('td', {}, j.started.replace('T', ' ')),
     h('td', { class: `state-${j.state}` }, j.state, j.exit_code !== undefined && j.exit_code !== null ? ` (${j.exit_code})` : ''),
@@ -39,10 +44,9 @@ export async function renderJobs() {
         h('thead', {}, h('tr', {}, ['started', 'state', 'run', 'analysis', 'resources', ''].map((c) => h('th', {}, c)))), h('tbody', {}, rows)))
       : h('p', { class: 'muted' }, 'No job started from the viewer yet.')),
     job ? h('div', { class: 'card' }, h('h3', {}, `Log of ${job.id}`), h('div', { class: 'small muted mono', style: 'margin-bottom:6px;word-break:break-all' }, job.argv.join(' ')), logBox) : '');
-  if (job) {
-    logBox.textContent = await api(`/api/jobs/${job.id}/log`) || '(no output yet)';
-    logBox.scrollTop = logBox.scrollHeight;
-  }
+  logBox.scrollTop = keepLog ? logTop : logBox.scrollHeight;
+  const table = root.querySelector('.table-wrap');
+  if (tableTop && table) table.scrollTop = tableTop;
   clearTimeout(timer);
   if (jobs.some((j) => j.state === 'running' || j.state === 'pending')) {
     timer = setTimeout(() => { if (root.classList.contains('active')) renderJobs(); }, 5000);
