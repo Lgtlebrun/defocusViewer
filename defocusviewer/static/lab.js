@@ -117,12 +117,22 @@ function stageCard(run) {
 function mountCard(snapshot, run) {
   const dev = snapshot.devices?.mount;
   const status = run?.status || {};
-  const known = status.mount_alt_deg !== undefined;
+  const m = run?.mount;
+  let position;
+  if (status.mount_alt_deg !== undefined) {
+    position = h('div', {}, h('b', {}, `alt ${status.mount_alt_deg.toFixed(3)}° · az ${status.mount_az_deg.toFixed(3)}°`), h('span', { class: 'muted small' }, ` (${status.t})`));
+  } else if (m?.t) {
+    position = h('div', {}, h('b', {}, `alt ${m.alt_deg.toFixed(4)}° · az ${m.az_deg.toFixed(4)}°`),
+      h('span', { class: 'muted small' }, ` ${run.state === 'running' ? 'last reported' : 'last known'} ${ago(m.t)} (log of ${run.name})`));
+  } else {
+    position = h('p', { class: 'muted small' }, 'alt / az unknown: no followed routine logs the mount, and the viewer does not open the device');
+  }
   return h('div', { class: 'card' }, h('h3', {}, 'Mount (CEM120)'),
     dev ? h('div', { class: 'small' }, h('span', { class: dev.present ? 'state-done' : 'muted' }, dev.present ? 'connected' : 'not connected'),
       ` · ${dev.path}`, dev.holders.length ? ` · held by pid ${dev.holders.join(', ')}` : ' · not open') : h('p', { class: 'muted small' }, 'not sampled'),
-    known ? h('div', {}, h('b', {}, `alt ${status.mount_alt_deg.toFixed(3)}° · az ${status.mount_az_deg.toFixed(3)}°`), h('span', { class: 'muted small' }, ` (${status.t})`))
-      : h('p', { class: 'muted small' }, 'alt / az unknown: no followed routine logs the mount, and the viewer does not open the device'));
+    position,
+    m?.state ? h('div', { class: 'small' }, `${m.state} since ${when(m.since)}`,
+      m.target ? ` · target alt ${m.target[0]}° · az ${m.target[1]}°` : '') : null);
 }
 
 function rigCard(snapshot) {

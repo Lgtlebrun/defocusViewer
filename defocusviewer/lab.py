@@ -233,13 +233,14 @@ for t, pids in fds.items():
         watch.add(rundir)
         writers[rundir] = sorted(pids)
 
-MARK = re.compile(r"\[INFO\] \[[^\]]*\] : (Starting \S+\.\.\.|\S+ completed in |Burn-in|Estimated end|Hold at pos|Holding in place|Results will be saved|Sweep x_positions)|\[Stage\] : Arrived to position|Stop requested by user|\[ERROR\]| failed !")
+MARK = re.compile(r"\[INFO\] \[[^\]]*\] : (Starting \S+\.\.\.|\S+ completed in |Burn-in|Estimated end|Hold at pos|Holding in place|Results will be saved|Sweep x_positions|Mount[ :])|\[Stage\] : Arrived to position|Stop requested by user|\[ERROR\]| failed !")
+MOUNT = re.compile(r"metadata for key (alt|az): (\S+)")
 NPY = re.compile(r"^(?P<fiber>[^_]+)_(?P<pos>-?\d+)_(?P<routine>.+?)(?:_(?P<idx>\d+))?\.npy$")
 runs = []
 for rundir in sorted(watch):
     if not rundir.startswith(data) or ".." in rundir or not os.path.isdir(rundir):
         continue
-    info = {"rundir": rundir, "writers": writers.get(rundir, []), "marks": [], "last_line": None}
+    info = {"rundir": rundir, "writers": writers.get(rundir, []), "marks": [], "last_line": None, "mount": {}}
     try:
         with open(f"{rundir}/log.log", errors="replace") as f:
             marked = False
@@ -249,6 +250,10 @@ for rundir in sorted(watch):
                     marked = bool(MARK.search(line))
                     if marked:
                         info["marks"].append(line.rstrip()[:600])
+                    elif "metadata for key a" in line:
+                        m = MOUNT.search(line)
+                        if m:
+                            info["mount"][m.group(1)] = [line[1:20], m.group(2)]
                 elif marked and line.startswith(">>") and len(info["marks"][-1]) < 4000:
                     info["marks"][-1] += " " + line[2:].strip()
         info["marks"] = info["marks"][:60] + info["marks"][60:][-400:]
@@ -309,6 +314,7 @@ def parse_run(info: dict, now: float, tz_offset: int) -> dict:
     cfg = cfg if isinstance(cfg, dict) else {}
     top, phases, current = None, {}, None
     hold, burn, sweeps, stopped = {}, {}, {}, False
+    mount = {"alt_deg": None, "az_deg": None, "t": None, "target": None, "state": None, "since": None}
     for line in info["marks"]:
         m = LOG_LINE.match(line)
         if not m:
@@ -349,8 +355,28 @@ def parse_run(info: dict, now: float, tz_offset: int) -> dict:
             out["stage_trace"].append([t, float(msg.split()[-1])])
         elif msg.startswith("Holding in place: stage at"):
             out["stage_trace"].append([t, float(re.search(r"stage at (-?[\d.]+)", msg).group(1))])
+        elif msg.startswith("Mount"):
+            angles = re.search(r"alt (-?[\d.]+) deg, az (-?[\d.]+) deg", msg)
+            if msg.startswith("Mount at") and angles:
+                mount.update(alt_deg=float(angles.group(1)), az_deg=float(angles.group(2)), t=t)
+            elif angles:
+                mount["target"] = [float(angles.group(1)), float(angles.group(2))]
+            state = {"Mount: searching home": "homing", "Mount: moving home": "going home", "Mount home": "home"}.get(msg)
+            state = state or ("slewing" if msg.startswith("Mount: slewing") else "at target" if msg.startswith("Mount at") else None)
+            if state:
+                mount.update(state=state, since=t)
         if "Stop requested by user" in msg:
             stopped = True
+    # the routine logs the mount's alt / az with every saved stack: newer than its "Mount at" line
+    alt, az = info.get("mount", {}).get("alt"), info.get("mount", {}).get("az")
+    if alt and az:
+        try:
+            t = _epoch(min(alt[0], az[0]), tz_offset)
+            if mount["t"] is None or t >= mount["t"]:
+                mount.update(alt_deg=float(alt[1]), az_deg=float(az[1]), t=t)
+        except ValueError:
+            pass
+    out["mount"] = mount if mount["state"] or mount["t"] else None
     status = info["status"] or {}
     if status.get("x_readback_um") is not None and status.get("t"):
         out["stage_trace"].append([_epoch(status["t"], tz_offset), status["x_readback_um"]])
