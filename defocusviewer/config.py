@@ -30,6 +30,9 @@ class Config:
     # hosts a job takes GPUs from by default, in order
     job_gpu_hosts: list = field(default_factory=lambda: ["farm-gpu1", "farm-gpu2"])
     launch_hosts: list = field(default_factory=lambda: ["farm-gpu1", "farm-gpu5", "farm-gpu2"])
+    # GPU jobs that may use one of these hosts fit in "mixed" precision (float32 fit, float64 polish) in place of the
+    # run's fit.gpu_precision: it is 2.3x slower than a P100 on an A2 where float64 is 30x
+    mixed_precision_hosts: list = field(default_factory=lambda: ["farm-gpu2"])
     gpus_per_job: int = 2
     gpu_job_cpu_workers: int = 4
     slurm_cpus: int = 10

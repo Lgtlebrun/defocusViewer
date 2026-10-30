@@ -22,6 +22,9 @@ def test_command(config):
     argv = jobs.command(config, jobs.FLOW_MODULES["stability"], "calibration_stand", "r", ["fit", "refit"], "on", gpu)
     assert argv == ["python", "-m", "DefocusTest.analysis.run_stability", "r", "--device", "calib", "--now", "--only",
                     "fit", "refit", "--ghost-mask", "on", "--gpu", "1", "--gpu-hosts", "farm-gpu1", "--n-workers", "4"]
+    on_gpu2 = jobs.default_resources(config, {"farm-gpu1": [0], "farm-gpu2": [1]}, True)      # may land on an A2
+    assert jobs.command(config, jobs.FLOW_MODULES["stability"], "MPS6", "r", ["fit"], "on", on_gpu2)[-2:] == ["--gpu-precision", "mixed"]
+    assert jobs.jointfit_command(config, "MPS6/Defocus/r", "seeded", None, 1.8, "on", False, on_gpu2)[-2:] == ["--gpu-precision", "mixed"]
     cpu = jobs.default_resources(config, {}, False)
     assert jobs.command(config, jobs.EXTRA_MODULES["temperature"], "Orbray6", "r", None, "on", cpu)[-2:] == ["--n-workers", "10"]
     with pytest.raises(ValueError):

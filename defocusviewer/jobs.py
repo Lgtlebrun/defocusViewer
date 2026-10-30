@@ -78,10 +78,15 @@ def command(config: Config, module: str, device: str, name: str, steps: list[str
         if module not in FLOW_MODULES.values():
             raise ValueError("only the stability / detection analyses run on GPUs")
         argv += ["--gpu", str(int(res["n_gpus"])), "--gpu-hosts", ",".join(res["gpu_hosts"]),
-                 "--n-workers", str(int(res["cpu_workers"]))]
+                 "--n-workers", str(int(res["cpu_workers"]))] + _precision(config, res)
     else:
         argv += ["--n-workers", str(int(res["cpus"]))]
     return argv
+
+
+def _precision(config: Config, res: dict) -> list[str]:
+    """--gpu-precision mixed when the GPUs of `res` may be on a host of mixed_precision_hosts, else nothing."""
+    return ["--gpu-precision", "mixed"] if set(res["gpu_hosts"]) & set(config.mixed_precision_hosts) else []
 
 
 def jointfit_command(config: Config, key: str, mode: str, reference: str | None, fnum: float, ghost: str, fit_theta: bool,
@@ -93,7 +98,7 @@ def jointfit_command(config: Config, key: str, mode: str, reference: str | None,
     argv += ["--fit-theta"] if fit_theta else []
     argv += ["--source", source] if source else []
     if res["mode"] == "gpu":
-        return argv + ["--gpu", str(int(res["n_gpus"])), "--gpu-hosts", ",".join(res["gpu_hosts"])]
+        return argv + ["--gpu", str(int(res["n_gpus"])), "--gpu-hosts", ",".join(res["gpu_hosts"])] + _precision(config, res)
     return argv + ["--n-workers", str(int(res["cpus"]))]
 
 

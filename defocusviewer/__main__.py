@@ -102,6 +102,7 @@ def main(argv=None):
     j.add_argument("--fit-theta", action="store_true", help="search theta around the reference's instead of holding it")
     j.add_argument("--gpu", type=int, help="number of GPUs (fit_joint device gpu)")
     j.add_argument("--gpu-hosts", help="hosts of the GPUs, in order")
+    j.add_argument("--gpu-precision", choices=("float64", "float32", "mixed"), help="of the GPU renders and fits (default float64)")
     j.add_argument("--n-workers", type=int, default=1, help="CPU workers without --gpu")
     j.add_argument("--pupil-shape", choices=("hexagon", "circle"), default="hexagon", help="aperture of the model")
     j.add_argument("--source", help="source model (default: the reference's)")
@@ -114,7 +115,10 @@ def main(argv=None):
     elif args.command == "ensure":
         ensure(config)
     elif args.command == "jointfit":
+        from DefocusTest import psf_batch
         from . import jointfit
+        if args.gpu_precision:
+            psf_batch.PRECISION = args.gpu_precision
         jointfit.run(config, args.run, args.mode, args.reference, args.fnum, args.ghost, args.fit_theta,
                      device="gpu" if args.gpu else "cpu", n_workers=args.gpu or args.n_workers,
                      gpu_hosts=args.gpu_hosts.split(",") if args.gpu_hosts else None, pupil_shape=args.pupil_shape,
