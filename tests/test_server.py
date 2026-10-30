@@ -1,3 +1,7 @@
+import json
+import os
+import socket
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -75,3 +79,19 @@ def test_fiber_figure_drawn_by_matplotlib(client):
     assert pdf.content[:4] == b"%PDF" and "attachment" in pdf.headers["content-disposition"]
     assert client.get("/api/run/fibers/figure", params={**query, "quantities": "nope"}).status_code == 400
     assert client.get("/api/run/fibers.csv", params={"run": RUN}).text.startswith("img,fiber,routine")
+
+
+def test_analyses_wait_for_a_running_fetch(client, config):
+    # rsync fills data/ before meta/: while a fetch copies the run, the analyses say so instead of a misleading reason
+    client.cookies.set(COOKIE, "secret")
+    config.jobs_dir.mkdir(parents=True, exist_ok=True)
+    log = config.jobs_dir / "j.log"
+    log.write_text("Starting rsync\n")
+    job = {"id": "j", "run": RUN, "label": "fetch", "mode": "local", "host": socket.gethostname(), "pid": os.getpid(),
+           "started": "2026-10-30T11:31:49", "state": "running", "log": str(log)}
+    (config.jobs_dir / "j.json").write_text(json.dumps(job))
+    data = client.get("/api/analyses", params={"run": RUN}).json()
+    assert "still copying" in data["reason"] and not data["viewer_joint_fit"]
+    assert client.post("/api/jobs", json={"run": RUN, "analysis": "flow", "steps": ["fit"], "resources": {"mode": "slurm"}}).status_code == 409
+    log.write_text(f"Starting rsync\nfetched {RUN}\nanalysing\n")      # fetch + analyse past its copy
+    assert "still copying" not in (client.get("/api/analyses", params={"run": RUN}).json()["reason"] or "")

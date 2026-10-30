@@ -146,6 +146,15 @@ def create_app(config: Config, token: str, background: bool = True) -> FastAPI:
         label = "fetch + analyse" if analyse else "fetch"
         return jobs.launch(config, registry, f"{device}/{config.test}/{name}", argv, res, label, force=True)
 
+    def fetching(run: str) -> str | None:
+        """Why the rundir is incomplete when a fetch job is still copying it (rsync fills data/ before meta/), else None."""
+        for job in registry.refresh():
+            if (job["run"] == run and job["label"].startswith("fetch") and job["state"] in ("running", "pending")
+                    and f"fetched {run}" not in jobs.job_tail(job)):
+                return (f"job {job['id']} ({job['label']}, started {job['started'].replace('T', ' ')}) is still copying "
+                        "this run from the rig: the analyses are available once the copy ends.")
+        return None
+
     rig = lab.Monitor(config, registry, on_finished=lambda run, job: fetch_job(run["device"], run["name"], True, job["ghost"]))
     def fit_pool() -> ProcessPoolExecutor:
         if refits["pool"] is None:
@@ -365,6 +374,8 @@ def create_app(config: Config, token: str, background: bool = True) -> FastAPI:
     @app.get("/api/analyses")
     def run_analyses(run: str, ghost: str = "on"):
         path = run_path(run)
+        if reason := fetching(run):
+            return {"flow": None, "reason": reason, "steps": [], "default_steps": [], "extras": [], "viewer_joint_fit": False}
         info = jobs.analyses(path, _ghost(ghost))
         free = sampler.free_gpus()
         uses_gpu = bool(set(info["default_steps"]) & jobs.GPU_STEPS)
@@ -378,6 +389,8 @@ def create_app(config: Config, token: str, background: bool = True) -> FastAPI:
         device = catalog.device_of(config, request.run)
         if device is None:
             raise HTTPException(400, "only runs under the data root can be analysed (the entry points find them there)")
+        if reason := fetching(request.run):
+            raise HTTPException(409, reason)
         info = jobs.analyses(path, ghost)
         if info["reason"]:
             raise HTTPException(400, info["reason"])
