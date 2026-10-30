@@ -24,11 +24,12 @@ class Config:
     state_dir: Path = Path("/disk/users/llebru/defocusViewer")
     cache_dir: Path = Path("/scratch/llebru/defocusViewer")
     python: str = sys.executable
-    # GPUs of farm-gpu3-6 are off limits for us since 2026-10-29 (their cores stay usable: launch_hosts keeps farm-gpu5)
-    gpu_hosts: list = field(default_factory=lambda: ["farm-gpu1"])
+    # GPUs of farm-gpu3-6 are off limits for us since 2026-10-29 (their cores stay usable: launch_hosts keeps farm-gpu5);
+    # ours are farm-gpu1 (2x P100) and farm-gpu2 (2x A2: fast in float32, ~30x slower than a P100 in float64)
+    gpu_hosts: list = field(default_factory=lambda: ["farm-gpu1", "farm-gpu2"])
     # hosts a job takes GPUs from by default, in order
-    job_gpu_hosts: list = field(default_factory=lambda: ["farm-gpu1"])
-    launch_hosts: list = field(default_factory=lambda: ["farm-gpu1", "farm-gpu5"])
+    job_gpu_hosts: list = field(default_factory=lambda: ["farm-gpu1", "farm-gpu2"])
+    launch_hosts: list = field(default_factory=lambda: ["farm-gpu1", "farm-gpu5", "farm-gpu2"])
     gpus_per_job: int = 2
     gpu_job_cpu_workers: int = 4
     slurm_cpus: int = 10
