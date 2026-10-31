@@ -43,6 +43,7 @@ A browser GUI for the Defocus test. It runs as one service on farm-gpu1 and does
 - **GPU steps** (fit, ghost_mask, refit, series) default to up to 2 idle GPUs of `job_gpu_hosts` (farm-gpu5, farm-gpu1). Such a job runs detached on farm-gpu1 at nice 10.
 - **Other steps, or no idle GPU:** a Slurm job of 10 cores.
 - **Guard:** a launch is refused while a viewer job, an analysis process (farm-gpu1, farm-gpu5) or a Slurm job of the same name works on the rundir.
+- **Rig watchdog:** `defocusviewer watch start` fetches each run that finishes on the rig and analyses its `_tophatbl-circle` variant on the P100s. [WATCHDOG.md](WATCHDOG.md) covers how to stop, check and restart it.
 
 ## Tests
 

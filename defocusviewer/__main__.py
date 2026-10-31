@@ -1,4 +1,4 @@
-"""defocusviewer serve | url | ensure | fetch <device> <rundir> [--analyse] | jointfit <run key> --fnum F [...]."""
+"""defocusviewer serve | url | ensure | fetch <device> <rundir> [--analyse] [--force] | jointfit <run key> --fnum F [...] | watch start|stop|status|run."""
 import argparse
 import fcntl
 import getpass
@@ -39,8 +39,14 @@ def answering(config) -> bool:
 
 
 def ensure(config):
-    """Starts the server in tmux session `defocusviewer` unless one answers (for cron, every few minutes)."""
+    """Starts the server in tmux session `defocusviewer` unless one answers (for cron, every few minutes), and the
+    rig watchdog when it is enabled and down."""
     config.state_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        from . import watch
+        watch.ensure(config)
+    except Exception as e:          # the viewer must come back even when the watchdog cannot
+        print(f"watchdog not restarted: {e}", file=sys.stderr)
     with open(config.state_dir / "ensure.lock", "w") as lock:
         try:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -58,13 +64,13 @@ def ensure(config):
         print(f"started the viewer in tmux session {TMUX_SESSION}: {url(config)}")
 
 
-def fetch(config, device: str, name: str, analyse: bool, ghost: str):
-    """Copies a rundir from pos-control (rsync, without waiting for meta/_finished), then optionally starts its default
-    analysis with the default resources."""
+def fetch(config, device: str, name: str, analyse: bool, ghost: str, force: bool = False):
+    """Copies a rundir from pos-control (rsync, without waiting for meta/_finished; `force`: also when a local copy
+    exists, rsync without deletes), then optionally starts its default analysis with the default resources."""
     os.environ.setdefault("POS_LOCAL_DATA", str(config.data_root))
     from posUtils.data.dir import RemoteCopyDataDir
     from . import catalog, cluster, jobs
-    RemoteCopyDataDir.getDir(catalog.device_id(device), config.test).ensureRunDir(name, now=True)
+    RemoteCopyDataDir.getDir(catalog.device_id(device), config.test).ensureRunDir(name, now=True, force=force)
     print(f"fetched {device}/{config.test}/{name}", flush=True)
     if not analyse:
         return
@@ -93,6 +99,9 @@ def main(argv=None):
     f.add_argument("rundir")
     f.add_argument("--analyse", action="store_true")
     f.add_argument("--ghost", choices=("on", "off"), default="on")
+    f.add_argument("--force", action="store_true", help="resync a local copy (rsync, no deletes)")
+    w = sub.add_parser("watch", help="rig watchdog: fetch + tophat_bl@circle analysis of new runs (watch.py)")
+    w.add_argument("action", choices=("start", "stop", "status", "run"))
     j = sub.add_parser("jointfit", help="joint fit of a run the pipeline cannot analyse, into its results/ (jointfit.py)")
     j.add_argument("run", help="run key, e.g. Orbray6/Defocus/20261015-155646_hexagonal-aperture-fit")
     j.add_argument("--mode", choices=("seeded", "scratch"), default="seeded")
@@ -123,8 +132,11 @@ def main(argv=None):
                      device="gpu" if args.gpu else "cpu", n_workers=args.gpu or args.n_workers,
                      gpu_hosts=args.gpu_hosts.split(",") if args.gpu_hosts else None, pupil_shape=args.pupil_shape,
                      source=args.source)
+    elif args.command == "watch":
+        from . import watch
+        getattr(watch, args.action)(config)
     else:
-        fetch(config, args.device, args.rundir, args.analyse, args.ghost)
+        fetch(config, args.device, args.rundir, args.analyse, args.ghost, args.force)
 
 
 if __name__ == "__main__":
