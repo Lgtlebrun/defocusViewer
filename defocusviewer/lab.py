@@ -77,6 +77,9 @@ STABILITY_FIELDS = [
     Field("run.pwm_arrays", "int_list", "PWM LED arrays in use", lo=1, hi=9),
     Field("output.path", "str", "run name (letters, digits, _ -)", pattern=r"[A-Za-z0-9_-]{1,80}"),
     Field("output.debug", "bool", "debug lines in log.log"),
+    Field("mount.run", "bool", "telescope mount: home, slew to alt / az first, home again at the end"),
+    Field("mount.alt", "float", "mount altitude (deg)", lo=-89, hi=90),
+    Field("mount.az", "float", "mount azimuth (deg)", lo=0, hi=360),
     Field("equalizer.run", "bool", "equalise the LEDs first"),
     Field("equalizer.target_intensity", "int", "counts of the brightest spot", lo=100, hi=4095),
     Field("temperature.run", "bool", "temperature acquisition (Arduino, 1 Hz)"),
@@ -94,9 +97,10 @@ STABILITY_FIELDS = [
     Field("calibration.run", "bool", "fiducial calibration on the rig at the end (needs fit.run)"),
 ]
 ROUTINES = {
-    "StabilityTest_new": {"module": "DefocusTest.sequences.StabilityTest_new",
-                          "config": "DefocusTest/DefocusTest/config/config_stabilitytest_new.yaml",
-                          "fields": STABILITY_FIELDS},
+    # the rig's StabilityTest_new became StabilityTest on 2026-10-30 (DefocusTest cc3d931), with the mount block
+    "StabilityTest": {"module": "DefocusTest.sequences.StabilityTest",
+                      "config": "DefocusTest/DefocusTest/config/config_stabilitytest.yaml",
+                      "fields": STABILITY_FIELDS},
 }
 
 
@@ -143,7 +147,7 @@ def merged_config(routine: str, base: dict, overrides: dict) -> tuple[dict, list
         if old != value:
             set_key(config, key, value)
             changes.append({"key": key, "old": old, "new": value})
-    if routine == "StabilityTest_new":
+    if routine == "StabilityTest":
         x, hold = get_key(config, "train.stage.x"), get_key(config, "stability.stage.hold_position")
         last = max(x) if x else (get_key(config, "train.stage.limits") or [None, None])[1]
         if get_key(config, "stability.run") and last is not None and hold != last:

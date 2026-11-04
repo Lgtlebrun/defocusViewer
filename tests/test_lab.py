@@ -34,7 +34,7 @@ def raw_run(marks, writers=(1234,), status=None, finished=False, stop=False, sta
 
 
 def test_merged_config_checks_every_override():
-    cfg, changes = lab.merged_config("StabilityTest_new", BASE, {"stability.duration_s": 120, "train.stage.x": [34900, 35000],
+    cfg, changes = lab.merged_config("StabilityTest", BASE, {"stability.duration_s": 120, "train.stage.x": [34900, 35000],
                                                                  "train_end.run": False})
     assert cfg["stability"]["duration_s"] == 120.0 and cfg["train"]["stage"]["x"] == [34900, 35000]
     assert {c["key"] for c in changes} == {"stability.duration_s", "train.stage.x", "train_end.run"}
@@ -42,7 +42,7 @@ def test_merged_config_checks_every_override():
     for bad in ({"evil.key": 1}, {"output.path": "x; rm -rf /"}, {"run.device": "Orbray7"}, {"all.camera.n_pics": 1.5},
                 {"stability.duration_s": True}, {"train.stage.x": [34000, 34500]}, {"run.pwm_arrays": "2"}):
         with pytest.raises(ValueError):
-            lab.merged_config("StabilityTest_new", BASE, bad)
+            lab.merged_config("StabilityTest", BASE, bad)
 
 
 def test_run_config_with_ruamel_tags_is_read():
@@ -53,7 +53,7 @@ def test_run_config_with_ruamel_tags_is_read():
 
 def test_parse_run_in_hold():
     t0 = 1_800_000_000
-    marks = [line(t0, "INFO", "StabilityTest_new", "Starting StabilityTest_new..."),
+    marks = [line(t0, "INFO", "StabilityTest", "Starting StabilityTest..."),
              line(t0 + 1, "INFO", "Main:PWMSpotsEqualizer", "Starting PWMSpotsEqualizer..."),
              line(t0 + 60, "INFO", "Main:PWMSpotsEqualizer", "PWMSpotsEqualizer completed in 1m"),
              line(t0 + 61, "INFO", "Main:train", "Starting train..."),
@@ -73,7 +73,7 @@ def test_parse_run_in_hold():
 
 def test_parse_run_sweep_progress_from_status_and_files():
     t0 = 1_800_000_000
-    marks = [line(t0, "INFO", "StabilityTest_new", "Starting StabilityTest_new..."),
+    marks = [line(t0, "INFO", "StabilityTest", "Starting StabilityTest..."),
              line(t0 + 1, "INFO", "Main:train_end", "Starting train_end..."),
              line(t0 + 2, "INFO", "Main:train_end", "Sweep x_positions : [34000 34500 35000]")]
     run = lab.parse_run(raw_run(marks, stacks={"train-end": {"stacks": 2, "positions": 2}}), t0 + 10, 0)
@@ -85,14 +85,14 @@ def test_parse_run_sweep_progress_from_status_and_files():
 
 def test_parse_run_outcomes():
     t0 = 1_800_000_000
-    start = [line(t0, "INFO", "StabilityTest_new", "Starting StabilityTest_new..."),
+    start = [line(t0, "INFO", "StabilityTest", "Starting StabilityTest..."),
              line(t0 + 1, "INFO", "Main:stability", "Starting stability...")]
     stopped = start + [line(t0 + 5, "WARNING", "Main:stability", "Stop requested by user, ending stability early"),
                        line(t0 + 6, "INFO", "Main:stability", "stability completed in 5s"),
-                       line(t0 + 7, "INFO", "StabilityTest_new", "StabilityTest_new completed in 7s")]
+                       line(t0 + 7, "INFO", "StabilityTest", "StabilityTest completed in 7s")]
     assert lab.parse_run(raw_run(stopped, writers=(), finished=True, stop=True), t0 + 8, 0)["state"] == "stopped"
     failed = start + [line(t0 + 5, "ERROR", "Main:stability", "stability failed !"),
-                      line(t0 + 6, "ERROR", "StabilityTest_new", "StabilityTest_new failed !")]
+                      line(t0 + 6, "ERROR", "StabilityTest", "StabilityTest failed !")]
     run = lab.parse_run(raw_run(failed, writers=(), finished=True), t0 + 8, 0)
     assert run["state"] == "failed" and len(run["errors"]) == 2
     assert lab.parse_run(raw_run(start, writers=()), t0 + 8, 0)["state"] == "died"
@@ -102,7 +102,7 @@ def test_parse_run_outcomes():
 
 def test_guard_ignores_monitoring_services():
     snapshot = {"processes": [{"pid": 1, "args": "python -m LabUZHMonitoring.services.TCsMonitoring"},
-                              {"pid": 2, "args": "python -m DefocusTest.sequences.StabilityTest_new cfg"}],
+                              {"pid": 2, "args": "python -m DefocusTest.sequences.StabilityTest cfg"}],
                 "devices": {"stage": {"real": "/dev/ttyACM0", "holders": [1]}, "mount": {"real": "/dev/x", "holders": [9]},
                             "camera 1": {"real": "/dev/bus/usb/002/045", "holders": []}}}
     assert lab.guard({**snapshot, "processes": snapshot["processes"][:1]}, "LabUZHMonitoring") == []
@@ -131,7 +131,7 @@ def test_probe_reads_a_run_held_open(config, tmp_path, monkeypatch):
     device.touch()
     config.lab_data, config.lab_devices = str(tmp_path / "rig"), {"stage": str(device)}
     with open(rundir / "log.log", "w") as log, open(device):
-        log.write("\n".join([line(t0, "INFO", "StabilityTest_new", "Starting StabilityTest_new..."),
+        log.write("\n".join([line(t0, "INFO", "StabilityTest", "Starting StabilityTest..."),
                              line(t0, "DEBUG", "Main", "noise"),
                              line(t0 + 1, "INFO", "Main:train", "Sweep x_positions : [34000 34500"),
                              ">>  35000]", ""]))
@@ -151,11 +151,11 @@ def test_launch_writes_the_config_and_starts_in_a_login_shell(config, monkeypatc
     monkeypatch.setattr(lab, "ssh", lambda c, command, stdin=None, timeout=60: calls.setdefault("ssh", (command, stdin)) and "")
     monkeypatch.setattr(lab.resources, "run_detached", lambda cmd, host, out, cwd: calls.setdefault("run", (cmd, host, str(out), cwd)) and 4242)
     registry = jobs.Registry(config.jobs_dir)
-    job = lab.launch(config, registry, "StabilityTest_new", BASE, "label", True, "on")
+    job = lab.launch(config, registry, "StabilityTest", BASE, "label", True, "on")
     command, stdin = calls["ssh"]
     assert command.startswith("mkdir -p ") and f"configs/{job['id']}.yaml" in command and yaml.safe_load(stdin) == BASE
     cmd, host, out, cwd = calls["run"]
-    assert cmd.startswith("setsid bash -lc ") and "nice" not in cmd and "DefocusTest.sequences.StabilityTest_new" in cmd
+    assert cmd.startswith("setsid bash -lc ") and "nice" not in cmd and "DefocusTest.sequences.StabilityTest" in cmd
     assert host == config.lab_host and cwd == f"{config.lab_root}/DefocusTest" and out == job["log"]
     assert registry.get(job["id"])["pid"] == 4242 and job["log_host"] == config.lab_host and job["mode"] == "lab"
 
@@ -169,9 +169,9 @@ def test_job_tail_reads_a_remote_log(monkeypatch):
 
 def test_follow_marks_a_stopped_job_and_starts_the_analysis(config, monkeypatch):
     registry = jobs.Registry(config.jobs_dir)
-    job = registry.save({"id": "20261027-150000-abcd", "run": "lab:StabilityTest_new", "label": "x", "argv": [], "mode": "lab",
+    job = registry.save({"id": "20261027-150000-abcd", "run": "lab:StabilityTest", "label": "x", "argv": [], "mode": "lab",
                          "state": "done", "host": "rig", "pid": 77, "log": "/r/x.log", "log_host": "rig", "ghost": "on",
-                         "started": "2026-10-27T15:00:00", "lab": {"routine": "StabilityTest_new", "rundir": None, "analyse_after": True}})
+                         "started": "2026-10-27T15:00:00", "lab": {"routine": "StabilityTest", "rundir": None, "analyse_after": True}})
     monkeypatch.setattr(registry, "refresh", lambda: [])
     started = []
     monitor = lab.Monitor(config, registry, on_finished=lambda run, job: started.append(run["key"]) or {"id": "fetch-1"})
@@ -200,24 +200,24 @@ def client(config, monkeypatch):
 def test_launch_preview_and_guard(client, monkeypatch):
     launched = []
     monkeypatch.setattr(lab, "launch", lambda *a: launched.append(a) or {"id": "j", "pid": 1, "label": "x"})
-    preview = client.post("/api/lab/launch", json={"routine": "StabilityTest_new", "overrides": {"stability.duration_s": 60}}).json()
+    preview = client.post("/api/lab/launch", json={"routine": "StabilityTest", "overrides": {"stability.duration_s": 60}}).json()
     assert preview["busy"] == [] and preview["changes"][0]["new"] == 60.0 and not launched
-    assert client.post("/api/lab/launch", json={"routine": "StabilityTest_new", "overrides": {"evil": 1}}).status_code == 400
+    assert client.post("/api/lab/launch", json={"routine": "StabilityTest", "overrides": {"evil": 1}}).status_code == 400
     assert client.post("/api/lab/launch", json={"routine": "rm -rf", "confirm": True}).status_code == 404
     client.raw["devices"]["stage"]["holders"] = [99]
-    response = client.post("/api/lab/launch", json={"routine": "StabilityTest_new", "confirm": True})
+    response = client.post("/api/lab/launch", json={"routine": "StabilityTest", "confirm": True})
     assert response.status_code == 409 and "held by pid 99" in response.json()["detail"] and not launched
     client.raw["devices"]["stage"]["holders"] = []
-    assert client.post("/api/lab/launch", json={"routine": "StabilityTest_new", "confirm": True}).status_code == 200 and launched
+    assert client.post("/api/lab/launch", json={"routine": "StabilityTest", "confirm": True}).status_code == 200 and launched
 
 
 def test_stop_only_a_followed_running_run(client, monkeypatch):
     touched = []
     monkeypatch.setattr(lab, "request_stop", lambda c, rundir: touched.append(rundir))
     assert client.post("/api/lab/stop", json={"rundir": "/etc"}).status_code == 404
-    client.raw["runs"] = [raw_run([line(1_800_000_000, "INFO", "StabilityTest_new", "Starting StabilityTest_new...")])]
+    client.raw["runs"] = [raw_run([line(1_800_000_000, "INFO", "StabilityTest", "Starting StabilityTest...")])]
     assert client.post("/api/lab/stop", json={"rundir": client.raw["runs"][0]["rundir"]}).status_code == 404   # not sampled yet
-    assert client.post("/api/lab/launch", json={"routine": "StabilityTest_new"}).status_code == 200      # the preview samples
+    assert client.post("/api/lab/launch", json={"routine": "StabilityTest"}).status_code == 200      # the preview samples
     assert client.post("/api/lab/stop", json={"rundir": client.raw["runs"][0]["rundir"]}).json()["ok"]
     assert touched == [client.raw["runs"][0]["rundir"]]
     assert client.post("/api/lab/kill", json={"job": "nope"}).status_code == 404

@@ -254,7 +254,7 @@ export async function renderLab() {
   const jobsByRun = Object.fromEntries((snapshot.jobs || []).filter((j) => j.lab?.rundir).map((j) => [j.lab.rundir, j]));
   const selected = runs.find((r) => r.rundir === getHash().labrun) || runs[0];
   const pending = (snapshot.jobs || []).filter((j) => j.state === 'running' && !j.lab?.rundir);
-  if (!form) await buildForm(snapshot.routines?.[0] || 'StabilityTest_new');
+  if (!form) await buildForm(snapshot.routines?.[0] || 'StabilityTest');
   const monitor = h('div', { class: 'lab-monitor' },
     h('div', { class: 'small muted' }, `${snapshot.host} sampled ${ago(snapshot.updated)}`,
       snapshot.error ? h('span', { class: 'state-failed' }, ` · ${snapshot.error}`) : null,
