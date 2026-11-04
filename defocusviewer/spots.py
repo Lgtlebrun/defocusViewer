@@ -231,7 +231,15 @@ def components(st: "RunState", fiber: str, k: int, params, noll) -> dict:
 
 
 def viewer_fit_path(folder: Path, img: str, ghost: str) -> Path:
-    return folder / f"{img}_{ghost}.json"
+    """The cache file of a spot's viewer fit. A restacked spot's `img` joins all its stack files with '+' (23 of them at
+    n_stack_ana 1150 / n_pics 50), past the 255-byte file name limit: such names keep the first file and the count and
+    end with a hash of the whole list."""
+    name = f"{img}_{ghost}.json"
+    if len(name.encode()) <= 200:
+        return folder / name
+    files = img.split("+")
+    digest = hashlib.sha1(img.encode()).hexdigest()[:16]
+    return folder / f"{files[0][:120]}+{len(files) - 1}more-{digest}_{ghost}.json"
 
 
 def load_viewer_fit(folder: Path | None, img: str, ghost: str, st: RunState) -> dict | None:

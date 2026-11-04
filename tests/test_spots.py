@@ -104,3 +104,12 @@ def test_desi_spot_is_not_refitted():
     detail = spots.detail(DESI_RUN, img, "on")
     assert detail["needs"] == "desi" and detail["fit"] is None
     assert detail["desi_note"].startswith("DESI is not fitted in this run")
+
+
+def test_viewer_fit_path_of_a_long_restack_fits_the_name_limit(tmp_path):
+    img = "+".join(f"fb_35000_stability_{i}.npy" for i in range(230, 253))
+    path = spots.viewer_fit_path(tmp_path, img, "on")
+    assert len(path.name.encode()) < 255 and path.name.startswith("fb_35000_stability_230.npy+22more-")
+    path.write_text("{}")                                    # writable, and distinct from another restack
+    assert spots.viewer_fit_path(tmp_path, img.replace("_252", "_253"), "on") != path
+    assert spots.viewer_fit_path(tmp_path, "fb_35000_stability_3.npy", "on").name == "fb_35000_stability_3.npy_on.json"
