@@ -6,7 +6,7 @@ import { addPin } from './compare.js';
 import { jointFitModal } from './analyses.js';
 import { attachMenu } from './menu.js';
 
-export const ROUTINE_ORDER = ['train_burnin', 'train', 'train2', 'stability', 'detection', 'positioner', 'train_end'];
+export const ROUTINE_ORDER = ['train_burnin', 'train', 'train2', 'stability', 'detection', 'positioner', 'pre_tracking', 'tracking', 'train_end'];
 const SERIES_COLORS = ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300', '#6250d6', '#e34948'];
 const SYMBOLS = ['circle', 'square', 'diamond', 'triangle-up', 'triangle-down', 'pentagon', 'hexagon', 'star'];
 const MAX_ROWS = 400;

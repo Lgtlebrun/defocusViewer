@@ -15,7 +15,8 @@ from DefocusTest.analysis import remote
 from . import catalog
 from .config import Config
 
-FLOW_MODULES = {"stability": "DefocusTest.analysis.run_stability", "detection": "DefocusTest.analysis.run_detection"}
+FLOW_MODULES = {"stability": "DefocusTest.analysis.run_stability", "detection": "DefocusTest.analysis.run_detection",
+                "tracking": "DefocusTest.analysis.run_tracking"}
 EXTRA_MODULES = {"calibration": "DefocusTest.analysis.run_calibration",
                  "leave_one_out": "DefocusTest.analysis.run_leave_one_out",
                  "temperature": "DefocusTest.analysis.run_temperature", "desi_fit": "DefocusTest.analysis.run_desi_fit"}
@@ -76,7 +77,7 @@ def command(config: Config, module: str, device: str, name: str, steps: list[str
         argv += ["--ghost-mask", ghost]
     if res["mode"] == "gpu":
         if module not in FLOW_MODULES.values():
-            raise ValueError("only the stability / detection analyses run on GPUs")
+            raise ValueError("only the stability / detection / tracking analyses run on GPUs")
         argv += ["--gpu", str(int(res["n_gpus"])), "--gpu-hosts", ",".join(res["gpu_hosts"]),
                  "--n-workers", str(int(res["cpu_workers"]))] + _precision(config, res)
     else:

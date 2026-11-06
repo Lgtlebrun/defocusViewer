@@ -15,7 +15,7 @@ from posUtils.data.dir import OutputFormat, RemoteCopyDataDir, RunDir, map_devic
 from .config import Config
 
 RUNDIR_NAME = re.compile(r"^\d{8}-\d{6}_[\w.+-]+$")
-FLOWS = ("stability", "detection", "positioner")
+FLOWS = ("tracking", "stability", "detection", "positioner")   # tracking: TrackingTest (pre_tracking + tracking rows)
 REMOTE_REFRESH_S = 600
 
 
@@ -88,7 +88,7 @@ def routines(path: Path) -> tuple[str, ...]:
 
 
 def flow(path: Path) -> str | None:
-    """"stability", "detection" or "positioner": the hold routine of the rundir, None without one."""
+    """"tracking", "stability", "detection" or "positioner": the hold routine of the rundir, None without one."""
     found = routines(path)
     return next((f for f in FLOWS if f in found), None)
 
@@ -102,6 +102,7 @@ def steps_done(path: Path, flow_name: str | None) -> list[str]:
         "refit": (results / "joint_fit_diag_records_unmasked.hdf5").exists(),
         "joint_checks": (plot / "healthchecks" / "joint_fit").exists(),
         "series": bool(flow_name) and any(results.glob(f"*_{flow_name}_timeseries_zernike.npz")),
+        "hold_overlay": (plot / "hold_overlay").exists(),
         "model_fits": (plot / "healthchecks" / "model_fit").exists(),
         "overlay": (plot / "healthchecks" / "train_curves_overlay.pdf").exists(),
         "relative": (plot / "relative_stability_zernike").exists(),

@@ -28,7 +28,7 @@ FIBER_QUANTITIES = {      # column: (label, unit, column of its sigma)
     "texp": ("exposure", "us", None),
 }
 X_AXES = {"time": "time", "minutes": "minutes since the first spot", "x_position": "stage position (um)", "index": "spot index"}
-ROUTINE_MARKERS = {"train_burnin": "x", "train": "o", "train2": "s", "stability": ".", "detection": ".", "positioner": ".",
+ROUTINE_MARKERS = {"train_burnin": "x", "train": "o", "train2": "s", "stability": ".", "detection": ".", "positioner": ".", "pre_tracking": ".", "tracking": ".",
                    "train_end": "D"}
 COLOUR_MAPS = {"viridis": "viridis", "cividis": "cividis", "inferno": "inferno", "magma": "magma", "gray": "gray",
                "hot": "hot", "blues": "am_seq", "blue-red": "am_div", "purple-green": "PRGn", "brown-teal": "BrBG"}

@@ -26,7 +26,9 @@ from posUtils.define import UMperCOUNT
 from .catalog import _mtime, open_rundir
 
 HOLD_ROUTINES = {"stability": "ZernikeStabilityTimeSeries", "detection": "ZernikeDetectionTimeSeries",
-                 "positioner": "ZernikePositionerTimeSeries"}
+                 "positioner": "ZernikePositionerTimeSeries", "tracking": "ZernikeTrackingTimeSeries"}
+SERIES_ROWS = {"tracking": ("pre_tracking", "tracking")}    # routines of the rows a series is fitted over, if not its own
+SERIES_OF = {"pre_tracking": "tracking"}                    # series a routine's frames belong to, if not its own
 GHOST_LINE = re.compile(r"\[(?:\w+:)?(\w+)\] : (\S+): ghost mask applied")
 STEPS_LINE = re.compile(r"Analysis steps of \S+: \[(.*)\]")
 COLUMNS = ["img", "fiber", "routine", "x_position", "timestamp", "texp", "n_frames", "mom_center_x", "mom_center_y"]
@@ -115,7 +117,8 @@ class RunState:
 
     def _hold_fits(self, fits, fiber, routine, analysis, series):
         """Hold frames of a fiber, in time order, against the rows of its series (as ModelFitPlots._hold)."""
-        frames = self.df[(self.df["fiber"] == fiber) & (self.df["routine"] == routine)].sort_values("timestamp")
+        rows = SERIES_ROWS.get(routine, (routine,))
+        frames = self.df[(self.df["fiber"] == fiber) & self.df["routine"].isin(rows)].sort_values("timestamp")
         if len(frames) != len(series["c4"]):
             return
         noll = [int(j) for j in series["zernike_noll"]]
@@ -406,8 +409,9 @@ def refit(path: Path, img: str, ghost: str, folder: Path, map_function=map) -> d
     row = st.df.loc[img]
     fiber, routine = str(row["fiber"]), str(row["routine"])
     image = st.image(img)
-    series_path = path / "results" / f"{fiber}_{routine}_timeseries_zernike.npz"
-    series = dict(np.load(series_path, allow_pickle=True)) if routine in HOLD_ROUTINES and series_path.exists() else None
+    series_routine = SERIES_OF.get(routine, routine)
+    series_path = path / "results" / f"{fiber}_{series_routine}_timeseries_zernike.npz"
+    series = dict(np.load(series_path, allow_pickle=True)) if series_routine in HOLD_ROUTINES and series_path.exists() else None
     noll = tuple(int(j) for j in series["zernike_noll"]) if series is not None else st.noll
     r_fixed = float(series["r_fixed"][0]) if series is not None and st.fix_r and "r_fixed" in series else None
     seeds = [_seed_from(f["params"], noll) for f in st.fits.get(img, [])] or [_nearest_seed(st, fiber, row, noll)]

@@ -25,7 +25,7 @@ from .config import Config
 STATIC = Path(__file__).parent / "static"
 COOKIE = "defocusviewer"
 PARTITIONS = ("express", "standard", "long", "verylong")
-ROUTINE_ORDER = ("train_burnin", "train", "train2", "stability", "detection", "positioner", "train_end")
+ROUTINE_ORDER = ("train_burnin", "train", "train2", "stability", "detection", "positioner", "pre_tracking", "tracking", "train_end")
 DETAIL_CACHE = 32           # spots whose detail is kept in memory (about 0.7 MB each)
 LOGIN_HINT = ("<h3>defocusViewer: not logged in</h3><p>Open the login URL printed by <code>defocusviewer url</code> "
               "on farm-gpu1 (it sets a cookie in this browser).</p>")

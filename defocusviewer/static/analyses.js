@@ -8,6 +8,7 @@ const STEP_HELP = {
   refit: 'the joint fit again, with weight 0 on the ghost boxes',
   joint_checks: 'joint-fit healthcheck figures',
   series: 'per-frame fits of the hold, and the train_end fits',
+  hold_overlay: 'raw hold series of all fibers overlaid (and vs mount altitude)',
   model_fits: 'redraw the data / model / residual figures (opt-in)',
   overlay: 'train vs train_end curves',
   relative: 'stability relative to each fiber',
