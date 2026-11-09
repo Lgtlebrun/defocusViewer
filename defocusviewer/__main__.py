@@ -1,4 +1,4 @@
-"""defocusviewer serve | url | ensure | fetch <device> <rundir> [--analyse] [--force] | jointfit <run key> --fnum F [...] | watch start|stop|status|run."""
+"""defocusviewer serve | url | ensure | fetch <device> <rundir> [--analyse] [--force] | move-data [runs] [--all] [--dry-run] | jointfit <run key> --fnum F [...] | watch start|stop|status|run."""
 import argparse
 import fcntl
 import getpass
@@ -47,6 +47,11 @@ def ensure(config):
         watch.ensure(config)
     except Exception as e:          # the viewer must come back even when the watchdog cannot
         print(f"watchdog not restarted: {e}", file=sys.stderr)
+    try:
+        from . import rawdata
+        rawdata.ensure_sweep(config)    # a data/ copied into a rundir outside the viewer goes to the raw root
+    except Exception as e:
+        print(f"raw data sweep not started: {e}", file=sys.stderr)
     with open(config.state_dir / "ensure.lock", "w") as lock:
         try:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -68,9 +73,8 @@ def fetch(config, device: str, name: str, analyse: bool, ghost: str, force: bool
     """Copies a rundir from pos-control (rsync, without waiting for meta/_finished; `force`: also when a local copy
     exists, rsync without deletes), then optionally starts its default analysis with the default resources."""
     os.environ.setdefault("POS_LOCAL_DATA", str(config.data_root))
-    from posUtils.data.dir import RemoteCopyDataDir
-    from . import catalog, cluster, jobs
-    RemoteCopyDataDir.getDir(catalog.device_id(device), config.test).ensureRunDir(name, now=True, force=force)
+    from . import cluster, jobs, rawdata
+    rawdata.fetch(config, device, name, force=force)       # data/ onto the raw root, the rest into the rundir
     print(f"fetched {device}/{config.test}/{name}", flush=True)
     if not analyse:
         return
@@ -88,6 +92,33 @@ def fetch(config, device: str, name: str, analyse: bool, ghost: str, force: bool
     print(f"started analysis job {job['id']} ({res['mode']}): {' '.join(argv)}")
 
 
+def move_data(config, runs: list[str], every: bool, dry_run: bool):
+    """Moves the data/ of rundirs onto the raw root (rawdata.move), one at a time; one move-data at a time."""
+    from . import rawdata
+    os.environ.setdefault("USER", getpass.getuser())     # cron starts us without it (squeue -u $USER)
+    config.state_dir.mkdir(parents=True, exist_ok=True)
+    with open(config.state_dir / "rawdata.lock", "w") as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            print(rawdata.log_line("another move-data runs: nothing done"), flush=True)
+            return
+        if every:
+            rundirs = rawdata.real_data_dirs(config, rawdata.SWEEP_MIN_AGE_S)
+        else:
+            rundirs = [config.data_root / r if "/" in r else next(config.data_root.glob(f"*/{config.test}/{r}"), None)
+                       for r in runs]
+            if missing := [r for r, path in zip(runs, rundirs) if path is None or not path.is_dir()]:
+                raise SystemExit(f"no such rundir under {config.data_root}: {', '.join(missing)}")
+        for rundir in rundirs:
+            key = rundir.relative_to(config.data_root)
+            try:
+                result = rawdata.move(config, rundir, dry_run=dry_run)
+            except Exception as e:      # one failed run must not stop the others
+                result = f"FAILED: {type(e).__name__}: {e}"
+            print(rawdata.log_line(f"{key}: {result}"), flush=True)
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(prog="defocusviewer", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -100,6 +131,10 @@ def main(argv=None):
     f.add_argument("--analyse", action="store_true")
     f.add_argument("--ghost", choices=("on", "off"), default="on")
     f.add_argument("--force", action="store_true", help="resync a local copy (rsync, no deletes)")
+    m = sub.add_parser("move-data", help="move rundirs' data/ onto the raw root, linked from the rundir (rawdata.py)")
+    m.add_argument("runs", nargs="*", help="rundir names or keys (device/test/name)")
+    m.add_argument("--all", action="store_true", help="every rundir whose data/ is a real directory")
+    m.add_argument("--dry-run", action="store_true")
     w = sub.add_parser("watch", help="rig watchdog: fetch + tophat_bl@circle analysis of new runs (watch.py)")
     w.add_argument("action", choices=("start", "stop", "status", "run"))
     j = sub.add_parser("jointfit", help="joint fit of a run the pipeline cannot analyse, into its results/ (jointfit.py)")
@@ -135,6 +170,10 @@ def main(argv=None):
     elif args.command == "watch":
         from . import watch
         getattr(watch, args.action)(config)
+    elif args.command == "move-data":
+        if not args.all and not args.runs:
+            parser.error("move-data needs rundirs or --all")
+        move_data(config, args.runs, args.all, args.dry_run)
     else:
         fetch(config, args.device, args.rundir, args.analyse, args.ghost, args.force)
 

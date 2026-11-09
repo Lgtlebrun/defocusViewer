@@ -36,8 +36,8 @@ def make_rundir(root: Path, name: str = "20261017-175317_stability-test", device
 
 @pytest.fixture
 def config(tmp_path):
-    return Config(data_root=tmp_path / "data", extra_roots={}, state_dir=tmp_path / "state", cache_dir=tmp_path / "cache",
-                  python="python")
+    return Config(data_root=tmp_path / "data", raw_root=tmp_path / "raw", extra_roots={}, state_dir=tmp_path / "state",
+                  cache_dir=tmp_path / "cache", python="python")
 
 
 @pytest.fixture

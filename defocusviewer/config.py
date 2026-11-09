@@ -15,6 +15,8 @@ CONFIG_DIR = Path.home() / ".config" / "defocusViewer"
 @dataclass
 class Config:
     data_root: Path = Path(os.environ.get("POS_LOCAL_DATA", "/disk/users/llebru/Defocus"))
+    # the rundirs' data/ (raw stacks, copies of the rig's) live here, linked from the rundir (rawdata.py)
+    raw_root: Path = Path("/disk/data1/des/Leonard/Defocus")
     extra_roots: dict = field(default_factory=lambda: {
         "defocusApSim-b": Path.home() / "projects" / "defocusApSim-b" / "data"})
     test: str = "Defocus"
