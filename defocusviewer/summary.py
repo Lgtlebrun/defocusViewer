@@ -25,7 +25,8 @@ KEY_RESULTS = {"joint fit": "theta_shared.npy", "ghost masks": "ghost_masks.hdf5
                "calibration": "calibration_summary.hdf5", "viewer joint fit": "viewer_joint_fit.json"}
 FLOW_NAMES = {"stability": "stability (long hold at one stage position)", "detection": "detection (hold, small stage steps)",
               "positioner": "positioner motion",
-              "tracking": "tracking (static pre-tracking hold, then sidereal mount tracking)"}
+              "tracking": "tracking (static pre-tracking hold, then sidereal mount tracking)",
+              "pointing": "pointing (hold at several mount pointings in turn)"}
 
 
 def duration(seconds: float) -> str:
@@ -160,7 +161,7 @@ def _camera_section(path, config, df) -> dict:
         rows.append(["stored crop", f"{image.shape[0]} px"])
     if camera.get("work_crop_side"):
         rows.append(["working crop", f"{camera['work_crop_side']} px"])
-    raw = any(_camera(config, s).get("save_raw_frames") for s in ("train", "stability", "detection", "tracking"))
+    raw = any(_camera(config, s).get("save_raw_frames") for s in ("train", "stability", "detection", "tracking", "pointing"))
     if raw:
         rows.append(["raw frames saved", "yes (data/raw_*.npz)"])
     return {"title": "Camera", "rows": rows}

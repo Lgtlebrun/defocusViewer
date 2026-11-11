@@ -6,7 +6,8 @@ import { addPin } from './compare.js';
 import { jointFitModal } from './analyses.js';
 import { attachMenu } from './menu.js';
 
-export const ROUTINE_ORDER = ['train_burnin', 'train', 'train2', 'stability', 'detection', 'positioner', 'pre_tracking', 'tracking', 'train_end'];
+export const ROUTINE_ORDER = ['train_burnin', 'train', 'train2', 'stability', 'detection', 'positioner', 'pre_tracking', 'tracking',
+  ...Array.from({ length: 16 }, (_, i) => `pointing_${i}`), 'train_end'];
 const SERIES_COLORS = ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300', '#6250d6', '#e34948'];
 const SYMBOLS = ['circle', 'square', 'diamond', 'triangle-up', 'triangle-down', 'pentagon', 'hexagon', 'star'];
 const MAX_ROWS = 400;
@@ -20,7 +21,8 @@ const options = loadOptions();
 export function routineStyle(routine, all) {
   const known = ROUTINE_ORDER.indexOf(routine);
   const extra = all.filter((r) => !ROUTINE_ORDER.includes(r)).sort();
-  const slot = known >= 0 ? known : ROUTINE_ORDER.length + extra.indexOf(routine);
+  const pointing = /^pointing_(\d+)$/.exec(routine);   // the 16 pointing routines alternate between two colours
+  const slot = pointing ? 3 + 3 * (Number(pointing[1]) % 2) : known >= 0 ? known : ROUTINE_ORDER.length + extra.indexOf(routine);
   return slot < SERIES_COLORS.length ? { color: SERIES_COLORS[slot], symbol: SYMBOLS[slot] } : { color: '#9b9a95', symbol: 'circle' };
 }
 

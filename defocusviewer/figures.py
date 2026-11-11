@@ -8,6 +8,7 @@ import matplotlib.dates as mdates
 import numpy as np
 import pandas as pd
 from amkit import plot
+from DefocusTest.define import POINTING_ROUTINES
 from matplotlib.lines import Line2D
 from matplotlib.patches import Rectangle
 
@@ -29,6 +30,7 @@ FIBER_QUANTITIES = {      # column: (label, unit, column of its sigma)
 }
 X_AXES = {"time": "time", "minutes": "minutes since the first spot", "x_position": "stage position (um)", "index": "spot index"}
 ROUTINE_MARKERS = {"train_burnin": "x", "train": "o", "train2": "s", "stability": ".", "detection": ".", "positioner": ".", "pre_tracking": ".", "tracking": ".",
+                   **{r: "." for r in POINTING_ROUTINES},
                    "train_end": "D"}
 COLOUR_MAPS = {"viridis": "viridis", "cividis": "cividis", "inferno": "inferno", "magma": "magma", "gray": "gray",
                "hot": "hot", "blues": "am_seq", "blue-red": "am_div", "purple-green": "PRGn", "brown-teal": "BrBG"}

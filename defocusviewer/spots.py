@@ -17,6 +17,7 @@ from DefocusTest import fit, psf
 from DefocusTest.analysis.JointFitHealthchecks import odd, psf_image, pupil_grid
 from DefocusTest.analysis.SpotLabeler import drop_overwritten_images, load_labeled_dataframe, load_labeled_result_df
 from DefocusTest.analysis.ZernikeStabilityAnalysis import _fit_candidate, load_crop_side, load_fnum, load_pupil_scale
+from DefocusTest.define import POINTING_ROUTINES
 from DefocusTest.devices import DESI
 from DefocusTest.imgDF import load_stack
 from DefocusTest.postprocessing import GhostMasks, detect_frames, fiber_ghost_table
@@ -26,9 +27,10 @@ from posUtils.define import UMperCOUNT
 from .catalog import _mtime, open_rundir
 
 HOLD_ROUTINES = {"stability": "ZernikeStabilityTimeSeries", "detection": "ZernikeDetectionTimeSeries",
-                 "positioner": "ZernikePositionerTimeSeries", "tracking": "ZernikeTrackingTimeSeries"}
-SERIES_ROWS = {"tracking": ("pre_tracking", "tracking")}    # routines of the rows a series is fitted over, if not its own
-SERIES_OF = {"pre_tracking": "tracking"}                    # series a routine's frames belong to, if not its own
+                 "positioner": "ZernikePositionerTimeSeries", "tracking": "ZernikeTrackingTimeSeries",
+                 "pointing": "ZernikePointingTimeSeries"}
+SERIES_ROWS = {"tracking": ("pre_tracking", "tracking"), "pointing": POINTING_ROUTINES}   # routines of the rows a series is fitted over, if not its own
+SERIES_OF = {"pre_tracking": "tracking", **{r: "pointing" for r in POINTING_ROUTINES}}      # series a routine's frames belong to, if not its own
 GHOST_LINE = re.compile(r"\[(?:\w+:)?(\w+)\] : (\S+): ghost mask applied")
 STEPS_LINE = re.compile(r"Analysis steps of \S+: \[(.*)\]")
 COLUMNS = ["img", "fiber", "routine", "x_position", "timestamp", "texp", "n_frames", "mom_center_x", "mom_center_y"]

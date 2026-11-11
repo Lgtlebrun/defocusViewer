@@ -15,7 +15,7 @@ from posUtils.data.dir import OutputFormat, RemoteCopyDataDir, RunDir, map_devic
 from .config import Config
 
 RUNDIR_NAME = re.compile(r"^\d{8}-\d{6}_[\w.+-]+$")
-FLOWS = ("tracking", "stability", "detection", "positioner")   # tracking: TrackingTest (pre_tracking + tracking rows)
+FLOWS = ("tracking", "pointing", "stability", "detection", "positioner")   # tracking: TrackingTest (pre_tracking + tracking rows), pointing: PointingTest (pointing_<i> rows)
 REMOTE_REFRESH_S = 600
 
 
@@ -88,9 +88,10 @@ def routines(path: Path) -> tuple[str, ...]:
 
 
 def flow(path: Path) -> str | None:
-    """"tracking", "stability", "detection" or "positioner": the hold routine of the rundir, None without one."""
+    """"tracking", "pointing", "stability", "detection" or "positioner": the hold routine of the rundir (pointing: its first
+    routine, pointing_0), None without one."""
     found = routines(path)
-    return next((f for f in FLOWS if f in found), None)
+    return next((f for f in FLOWS if f in found or f"{f}_0" in found), None)
 
 
 def steps_done(path: Path, flow_name: str | None) -> list[str]:
