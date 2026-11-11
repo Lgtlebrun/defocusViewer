@@ -1,4 +1,4 @@
-"""Watchdog of the rig: fetches every StabilityTest run that finishes on pos-control after the watchdog starts, makes its
+"""Watchdog of the rig: fetches every StabilityTest, TrackingTest and PointingTest run that finishes on pos-control after the watchdog starts, makes its
 variant `<run>_tophatbl-circle` (tophat_bl@circle, ghost mask on, lambda scan 650-750 nm) and runs the full analysis of
 the variant on the two P100s of farm-gpu1, one run at a time, as soon as no GPU analysis (ours or another session's)
 runs there and both P100s are idle.
@@ -26,7 +26,8 @@ TMUX_SESSION = "defocusviewer-watch"
 SUFFIX, SOURCE, APERTURE, GHOST = "tophatbl-circle", "tophat_bl", "circle", "on"
 FIT = {"lbda_range_nm": [650.0, 750.0]}
 GPU_HOST, N_GPUS = "farm-gpu1", 2
-MATCH = re.compile(r"stability")            # rig runs the watchdog takes (StabilityTest names them stability-...)
+MATCH = re.compile(r"stability|tracking|pointing")   # rig runs the watchdog takes (named stability-..., tracking-..., pointing-...)
+FLOWS = ("stability", "tracking", "pointing")        # their analysis flows, checked on the dataframe
 RIG_POLL_S, TICK_S = 300, 60
 FETCH_TRIES = 3
 
@@ -149,10 +150,10 @@ def _prepare(config: Config, key: str, run: dict) -> None:
         log(f"{variant_key} exists already: analysed as it is")
     variant_path = catalog.resolve(config, variant_key)
     info = jobs.analyses(variant_path, GHOST)
-    if info["reason"] or info["flow"] != "stability":
+    if info["reason"] or info["flow"] not in FLOWS:
         run.update(state="skipped", note=info["reason"] or f"flow {info['flow']}")
         return
-    run.update(state="queued", variant=variant_key, steps=info["default_steps"],
+    run.update(state="queued", variant=variant_key, flow=info["flow"], steps=info["default_steps"],
                queued=datetime.now().isoformat(timespec="seconds"))
     log(f"{variant_key}: queued for the P100s ({' '.join(info['default_steps'])})")
 
@@ -161,7 +162,7 @@ def _launch(config: Config, registry: jobs.Registry, key: str, run: dict) -> Non
     device, _, name = run["variant"].split("/", 2)
     res = {"mode": "gpu", "n_gpus": N_GPUS, "gpu_hosts": [GPU_HOST], "cpu_workers": config.gpu_job_cpu_workers,
            "launch_host": GPU_HOST}
-    argv = jobs.command(config, jobs.FLOW_MODULES["stability"], device, name, run["steps"], GHOST, res)
+    argv = jobs.command(config, jobs.FLOW_MODULES[run.get("flow", "stability")], device, name, run["steps"], GHOST, res)
     job = jobs.launch(config, registry, run["variant"], argv, res,
                       f"watchdog: full analysis ({variants.model_name(SOURCE, APERTURE)}, lambda 650-750 nm)", GHOST,
                       rundir=catalog.resolve(config, run["variant"]))
