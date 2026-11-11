@@ -26,7 +26,8 @@ class Config:
     state_dir: Path = Path("/disk/users/llebru/defocusViewer")
     cache_dir: Path = Path("/scratch/llebru/defocusViewer")
     python: str = sys.executable
-    # GPUs of farm-gpu3-6 are off limits for us since 2026-10-29 (their cores stay usable: launch_hosts keeps farm-gpu5);
+    # farm-gpu3-6 are amkit restricted hosts (GPUs since 2026-10-29, cores too since 2026-10-30): shown and used only
+    # when the server runs with AMKIT_ALLOW_HOSTS naming them;
     # ours are farm-gpu1 (2x P100) and farm-gpu2 (2x A2: fast in float32, ~30x slower than a P100 in float64)
     gpu_hosts: list = field(default_factory=lambda: ["farm-gpu1", "farm-gpu2"])
     # hosts a job takes GPUs from by default, in order
@@ -37,6 +38,12 @@ class Config:
     mixed_precision_hosts: list = field(default_factory=lambda: ["farm-gpu2"])
     gpus_per_job: int = 2
     gpu_job_cpu_workers: int = 4
+    # CPU jobs run detached over SSH on the host of these with the most idle cores (cores minus load minus
+    # cpu_margin), `cpu_cores` of them at most; Slurm only when none has `cpu_min_cores` idle
+    cpu_hosts: list = field(default_factory=lambda: ["farm-gpu5", "farm-gpu4", "farm-gpu6", "farm-gpu3", "farm-gpu2"])
+    cpu_cores: int = 32
+    cpu_min_cores: int = 8
+    cpu_margin: int = 8
     slurm_cpus: int = 10
     slurm_partition: str = "standard"
     slurm_mem_per_cpu: str = "2000M"

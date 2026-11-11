@@ -469,7 +469,7 @@ class Monitor:
 
     def _follow_jobs(self, lab_jobs: list[dict], runs: list[dict]):
         """Records each lab job's rundir once its log names it; when the job ended, its outcome and the analysis after."""
-        self.registry.refresh()
+        self.registry.refresh(max_age=jobs.REFRESH_PERIOD_S)
         for job in lab_jobs:
             job = self.registry.get(job["id"])
             changed = False

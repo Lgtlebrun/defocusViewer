@@ -1,11 +1,13 @@
 """Analysis jobs started from the viewer: the analyses a rundir offers, default resources, the command, the launch
-(detached on a GPU host, or on Slurm), the registry of jobs, and the guard against two jobs on one rundir."""
+(detached on a GPU or CPU host over SSH, or on Slurm), the registry of jobs, and the guard against two jobs on one rundir."""
 import json
 import os
 import re
 import secrets
 import shlex
 import threading
+import time
+import traceback
 from datetime import datetime
 from pathlib import Path
 
@@ -23,6 +25,7 @@ EXTRA_MODULES = {"calibration": "DefocusTest.analysis.run_calibration",
 GPU_STEPS = {"fit", "ghost_mask", "refit", "series"}
 FETCH_MODULE = "defocusviewer"
 EXIT_LINE = re.compile(r"^__exit__ (\d+)$", re.M)
+REFRESH_PERIOD_S = 30     # how often the one refresher of the server follows the running jobs
 ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 
 
@@ -55,14 +58,29 @@ def analyses(path: Path, ghost: str) -> dict:
             "default_steps": [s for s in steps if s not in remote.OPT_IN_STEPS]}
 
 
-def default_resources(config: Config, free_gpus: dict[str, list[int]], uses_gpu: bool) -> dict:
-    """Up to `gpus_per_job` idle GPUs of the job GPU hosts when the job fits on GPUs and one is free, else a Slurm job of
+def default_resources(config: Config, free_gpus: dict[str, list[int]], uses_gpu: bool,
+                      free_cores: dict[str, int] | None = None) -> dict:
+    """Up to `gpus_per_job` idle GPUs of the job GPU hosts when the job fits on GPUs and one is free, else up to
+    `cpu_cores` cores of the CPU host with the most idle ones (`free_cores`: {host: idle cores}), else a Slurm job of
     `slurm_cpus` cores."""
     hosts = [h for h in config.job_gpu_hosts if free_gpus.get(h)]
     n_free = sum(len(free_gpus[h]) for h in hosts)
     if uses_gpu and n_free:
         return {"mode": "gpu", "n_gpus": min(config.gpus_per_job, n_free), "gpu_hosts": hosts,
                 "cpu_workers": config.gpu_job_cpu_workers, "launch_host": config.launch_hosts[0]}
+    return cpu_resources(config, free_cores or {})
+
+
+def cpu_resources(config: Config, free_cores: dict[str, int]) -> dict:
+    """Cores of the CPU host with the most idle ones (detached over SSH), or a Slurm job when none has `cpu_min_cores`."""
+    idle = {h: free_cores[h] for h in config.cpu_hosts if free_cores.get(h, 0) >= config.cpu_min_cores}
+    if idle:
+        host = max(idle, key=idle.get)
+        return {"mode": "cpu", "host": host, "cpus": min(config.cpu_cores, idle[host])}
+    return slurm_resources(config)
+
+
+def slurm_resources(config: Config) -> dict:
     return {"mode": "slurm", "cpus": config.slurm_cpus, "partition": config.slurm_partition,
             "mem_per_cpu": config.slurm_mem_per_cpu, "time": None}
 
@@ -117,6 +135,19 @@ class Registry:
     def __init__(self, folder: Path):
         self.folder = folder
         self._lock = threading.Lock()
+        self._refreshed = 0.0
+
+    def start_refresher(self, period: float = REFRESH_PERIOD_S):
+        """The one thread that follows the running jobs (ps per host, the Slurm listing): the pages and endpoints only
+        read the jobs from disk, so the number of open tabs does not change what is asked of the hosts and Slurm."""
+        def loop():
+            while True:
+                try:
+                    self.refresh()
+                except Exception:
+                    traceback.print_exc()
+                time.sleep(period)
+        threading.Thread(target=loop, name="jobs-refresher", daemon=True).start()
 
     def save(self, job: dict) -> dict:
         self.folder.mkdir(parents=True, exist_ok=True)
@@ -135,9 +166,13 @@ class Registry:
         paths = sorted(self.folder.glob("*.json"), reverse=True)[:limit] if self.folder.exists() else []
         return [json.loads(p.read_text()) for p in paths]
 
-    def refresh(self) -> list[dict]:
-        """The jobs, newest first, with the state of the running ones updated (one ps per host, one squeue)."""
+    def refresh(self, max_age: float = 0) -> list[dict]:
+        """The jobs, newest first, with the state of the running ones updated (one ps per host, one squeue); when the
+        last update is younger than `max_age` seconds, just the jobs as they are on disk."""
         with self._lock:
+            if time.time() - self._refreshed < max_age:
+                return self.all()
+            self._refreshed = time.time()
             jobs = self.all()
             running = [j for j in jobs if j["state"] in ("running", "pending")]
             if not running:
@@ -183,11 +218,11 @@ class Registry:
 
 
 def running_on(config: Config, registry: Registry, run_key: str, name: str) -> list[str]:
-    """What is already working on rundir `name`: viewer jobs, analysis processes on the launch hosts (other sessions
-    run them too), Slurm jobs named after it."""
+    """What is already working on rundir `name`: viewer jobs, analysis processes on the launch and CPU hosts (other
+    sessions run them too), Slurm jobs named after it."""
     found = [f"viewer job {j['id']} ({j['label']})" for j in registry.refresh()
              if j["run"] == run_key and j["state"] in ("running", "pending")]
-    for host in config.launch_hosts:
+    for host in dict.fromkeys([*config.launch_hosts, *config.cpu_hosts]):
         target = None if resources.is_local(host) else host
         out = resources._shell("ps -eo pid=,user=,args=", target) or ""
         for line in out.splitlines():
@@ -200,8 +235,8 @@ def running_on(config: Config, registry: Registry, run_key: str, name: str) -> l
 
 def launch(config: Config, registry: Registry, run_key: str, argv: list[str], res: dict, label: str,
            ghost: str | None = None, force: bool = False, rundir: Path | None = None) -> dict:
-    """Starts `argv` for run `run_key` (detached on the launch host, or as a Slurm job of the rundir's name) and
-    registers it; Conflict when something already works on the rundir and not `force`."""
+    """Starts `argv` for run `run_key` (detached on the launch host or the CPU host, or as a Slurm job of the rundir's
+    name) and registers it; Conflict when something already works on the rundir and not `force`."""
     name = run_key.rsplit("/", 1)[1]
     if not force:
         busy = running_on(config, registry, run_key, name)
@@ -221,7 +256,7 @@ def launch(config: Config, registry: Registry, run_key: str, argv: list[str], re
             mem_per_cpu=res["mem_per_cpu"], time=res.get("time") or None, cwd=config.state_dir)
         job.update(state="pending", log=str(out).replace("%j", job["slurm_id"]))
     else:
-        host = res.get("launch_host") or config.launch_hosts[0]
+        host = res.get("host") or res.get("launch_host") or config.launch_hosts[0]
         log = config.jobs_dir / f"{job_id}.log"
         job["pid"] = resources.run_detached(_detached(argv, env), None if resources.is_local(host) else host, log,
                                             config.state_dir)
@@ -233,6 +268,7 @@ def cancel(job: dict) -> None:
     """Stops a job: scancel on Slurm, else SIGTERM to its whole session on its host."""
     if job["mode"] == "slurm":
         resources._shell(f"scancel {int(job['slurm_id'])}")
+        resources.slurm_forget("squeue")
     else:
         host = job["host"]
         resources._shell(f"kill -TERM -- -{int(job['pid'])}", None if resources.is_local(host) else host)

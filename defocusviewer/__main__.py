@@ -65,7 +65,7 @@ def ensure(config):
         subprocess.run(["tmux", "kill-session", "-t", TMUX_SESSION], capture_output=True)
         log = config.state_dir / "server.log"
         command = f"{sys.executable} -m defocusviewer serve >> {log} 2>&1"
-        subprocess.run(["tmux", "new-session", "-d", "-s", TMUX_SESSION, command], check=True)
+        subprocess.run(["tmux", "new-session", "-d", "-c", str(config.state_dir), "-s", TMUX_SESSION, command], check=True)
         print(f"started the viewer in tmux session {TMUX_SESSION}: {url(config)}")
 
 
@@ -84,7 +84,8 @@ def fetch(config, device: str, name: str, analyse: bool, ghost: str, force: bool
         print(f"no analysis started: {info['reason']}")
         return
     free = {h: cluster.host_state(h).get("free_gpus") or [] for h in config.job_gpu_hosts}
-    res = jobs.default_resources(config, free, bool(set(info["default_steps"]) & jobs.GPU_STEPS))
+    cores = {h: cluster.cpu_host_state(h, config.cpu_margin).get("free_cores", 0) for h in config.cpu_hosts}
+    res = jobs.default_resources(config, free, bool(set(info["default_steps"]) & jobs.GPU_STEPS), cores)
     argv = jobs.command(config, jobs.FLOW_MODULES[info["flow"]], device, name, info["default_steps"], ghost, res)
     # force: the run was not local before this fetch, so the only job on it is this one (which the guard would see)
     job = jobs.launch(config, jobs.Registry(config.jobs_dir), f"{device}/{config.test}/{name}", argv, res,

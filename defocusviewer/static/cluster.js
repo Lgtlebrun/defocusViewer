@@ -78,5 +78,5 @@ export async function renderCluster() {
         h('td', {}, bar(n.memory_allocated_mb / n.memory_mb, `${(n.memory_allocated_mb / 1024).toFixed(0)} / ${(n.memory_mb / 1024).toFixed(0)} GB`)),
         h('td', {}, n.usable)))))));
   clearTimeout(timer);
-  timer = setTimeout(() => { if (root.classList.contains('active')) renderCluster(); }, 10000);
+  timer = setTimeout(() => { if (root.classList.contains('active')) renderCluster(); }, 60000);
 }

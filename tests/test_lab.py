@@ -172,7 +172,7 @@ def test_follow_marks_a_stopped_job_and_starts_the_analysis(config, monkeypatch)
     job = registry.save({"id": "20261027-150000-abcd", "run": "lab:StabilityTest", "label": "x", "argv": [], "mode": "lab",
                          "state": "done", "host": "rig", "pid": 77, "log": "/r/x.log", "log_host": "rig", "ghost": "on",
                          "started": "2026-10-27T15:00:00", "lab": {"routine": "StabilityTest", "rundir": None, "analyse_after": True}})
-    monkeypatch.setattr(registry, "refresh", lambda: [])
+    monkeypatch.setattr(registry, "refresh", lambda **kw: [])
     started = []
     monitor = lab.Monitor(config, registry, on_finished=lambda run, job: started.append(run["key"]) or {"id": "fetch-1"})
     monkeypatch.setattr(jobs, "job_tail", lambda job, size=0: "Results will be saved under /data/MPS6/Defocus/20261027-121028_stability-x\n")

@@ -52,6 +52,20 @@ def test_registry_finishes_a_local_job(config):
         registry.get("../x")
 
 
+def test_registry_refresh_is_throttled(config, monkeypatch):
+    """One refresher follows the jobs; callers that pass max_age only read the jobs from disk while it is fresh."""
+    registry = jobs.Registry(config.jobs_dir)
+    registry.save({"id": "20261022-000000-abcd", "run": "k", "label": "t", "mode": "slurm", "slurm_id": 5, "state": "running",
+                   "started": "2026-10-22T00:00:00"})
+    asked = []
+    monkeypatch.setattr(jobs.resources, "slurm_jobs", lambda: asked.append(1) or {"5": {"states": {"RUNNING": 1}}})
+    for _ in range(4):
+        registry.refresh(max_age=60)
+    assert len(asked) == 1
+    registry.refresh()
+    assert len(asked) == 2
+
+
 def test_gpu_worker_traced_to_its_job():
     from defocusviewer import cluster
     tree = {10: (1, "bash -c x"),

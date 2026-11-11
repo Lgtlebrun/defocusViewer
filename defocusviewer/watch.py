@@ -84,7 +84,7 @@ def ensure(config: Config) -> None:
     if not (folder(config) / "enabled").exists() or tmux_alive():
         return
     command = f"{sys.executable} -m defocusviewer watch run >> {folder(config) / 'watch.log'} 2>&1"
-    subprocess.run(["tmux", "new-session", "-d", "-s", TMUX_SESSION, command], check=True)
+    subprocess.run(["tmux", "new-session", "-d", "-c", str(config.state_dir), "-s", TMUX_SESSION, command], check=True)
 
 
 def status(config: Config) -> None:

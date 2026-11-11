@@ -12,6 +12,7 @@ function resourcesText(job) {
   const r = job.resources || {};
   if (r.mode === 'gpu') return `${r.n_gpus} GPU(s): ${r.gpu_hosts.join(', ')}, on ${r.launch_host}`;
   if (r.mode === 'slurm') return `Slurm ${job.slurm_id}: ${r.cpus} cores, ${r.partition}`;
+  if (r.mode === 'cpu') return `${r.cpus} cores on ${r.host}`;
   return `on ${job.host}`;
 }
 
@@ -49,6 +50,6 @@ export async function renderJobs() {
   if (tableTop && table) table.scrollTop = tableTop;
   clearTimeout(timer);
   if (jobs.some((j) => j.state === 'running' || j.state === 'pending')) {
-    timer = setTimeout(() => { if (root.classList.contains('active')) renderJobs(); }, 5000);
+    timer = setTimeout(() => { if (root.classList.contains('active')) renderJobs(); }, 30000);
   }
 }

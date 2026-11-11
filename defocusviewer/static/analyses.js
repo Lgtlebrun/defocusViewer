@@ -20,11 +20,12 @@ function storedGhost() {
   try { return localStorage.getItem('ghost') || 'on'; } catch { return 'on'; }
 }
 
-export function resourcesEditor(defaults, freeGpus, cpuDefaults) {
+export function resourcesEditor(defaults, freeGpus, cpuDefaults, freeCores) {
   // <details> "Advanced settings" with a one-line summary; value() returns the resources of the job
   const config = window.viewerConfig;
   const gpuDefaults = defaults.mode === 'gpu' ? defaults : { n_gpus: 2, gpu_hosts: config.job_gpu_hosts, cpu_workers: 4, launch_host: config.launch_hosts[0] };
-  const slurmDefaults = defaults.mode === 'slurm' ? defaults : cpuDefaults;
+  const coreDefaults = [defaults, cpuDefaults].find((d) => d.mode === 'cpu') || { host: config.cpu_hosts[0], cpus: config.cpu_cores };
+  const slurmDefaults = [defaults, cpuDefaults].find((d) => d.mode === 'slurm') || config.slurm;
   const mode = { value: defaults.mode, chosen: false };      // chosen: the user picked it, the step boxes no longer change it
   const group = `mode-${Math.random().toString(36).slice(2)}`;   // one radio group per editor
   const radio = (value, label) => {
@@ -40,6 +41,9 @@ export function resourcesEditor(defaults, freeGpus, cpuDefaults) {
   });
   const workers = h('input', { type: 'number', min: 1, max: 32, value: gpuDefaults.cpu_workers });
   const launchHost = h('select', {}, config.launch_hosts.map((host) => h('option', { value: host, selected: host === gpuDefaults.launch_host }, host)));
+  const cpuHost = h('select', {}, config.cpu_hosts.map((host) => h('option', { value: host, selected: host === coreDefaults.host },
+    `${host} (${freeCores?.[host] ?? '?'} idle)`)));
+  const cores = h('input', { type: 'number', min: 1, max: 384, value: coreDefaults.cpus });
   const cpus = h('input', { type: 'number', min: 1, max: 128, value: slurmDefaults.cpus });
   const partition = h('select', {}, config.partitions.map((p) => h('option', { value: p, selected: p === slurmDefaults.partition }, p)));
   const memory = h('input', { type: 'text', value: slurmDefaults.mem_per_cpu, size: 6 });
@@ -47,33 +51,41 @@ export function resourcesEditor(defaults, freeGpus, cpuDefaults) {
   const gpuSet = h('fieldset', {}, h('legend', {}, 'GPUs (no Slurm: the job runs detached on the launch host)'),
     h('div', { class: 'row' }, 'GPUs ', nGpus, ' CPU workers ', workers, ' launch host ', launchHost),
     h('div', { class: 'row' }, 'hosts, in order: ', hostBoxes));
+  const cpuSet = h('fieldset', {}, h('legend', {}, 'Cores over SSH (no Slurm: the job runs detached on the host, nice 10)'),
+    h('div', { class: 'row' }, 'host ', cpuHost, ' cores ', cores));
   const slurmSet = h('fieldset', {}, h('legend', {}, 'Slurm (CPU only)'),
     h('div', { class: 'row' }, 'cores ', cpus, ' partition ', partition, ' memory per core ', memory, ' time limit ', time));
   const summary = h('span', { class: 'muted' });
   const value = () => (mode.value === 'gpu'
     ? { mode: 'gpu', n_gpus: Number(nGpus.value), gpu_hosts: hostBoxes.map((l) => l.querySelector('input')).filter((b) => b.checked).map((b) => b.value),
         cpu_workers: Number(workers.value), launch_host: launchHost.value }
+    : mode.value === 'cpu' ? { mode: 'cpu', host: cpuHost.value, cpus: Number(cores.value) }
     : { mode: 'slurm', cpus: Number(cpus.value), partition: partition.value, mem_per_cpu: memory.value, time: time.value || null });
   function update() {
     gpuSet.hidden = mode.value !== 'gpu';
+    cpuSet.hidden = mode.value !== 'cpu';
     slurmSet.hidden = mode.value !== 'slurm';
     const v = value();
     summary.textContent = v.mode === 'gpu'
       ? `${v.n_gpus} GPU(s) from ${v.gpu_hosts.join(', ') || 'no host'}, ${v.cpu_workers} CPU workers on ${v.launch_host}`
+      : v.mode === 'cpu' ? `${v.cpus} cores on ${v.host}`
       : `Slurm job: ${v.cpus} cores on ${v.partition}, ${v.mem_per_cpu} per core`;
   }
   const el = h('details', {}, h('summary', {}, 'Resources: ', summary, h('span', { class: 'small muted' }, '  (advanced settings)')),
-    h('div', { class: 'row' }, radio('gpu', 'GPUs'), radio('slurm', 'Slurm CPU job')), gpuSet, slurmSet);
-  for (const input of [nGpus, workers, launchHost, cpus, partition, memory, time, ...hostBoxes.map((l) => l.querySelector('input'))]) input.addEventListener('change', update);
+    h('div', { class: 'row' }, radio('gpu', 'GPUs'), radio('cpu', 'cores over SSH'), radio('slurm', 'Slurm CPU job')), gpuSet, cpuSet, slurmSet);
+  for (const input of [nGpus, workers, launchHost, cpuHost, cores, cpus, partition, memory, time, ...hostBoxes.map((l) => l.querySelector('input'))]) input.addEventListener('change', update);
   update();
   const setMode = (m) => {
+    // 'gpu', or 'cpu': the CPU default (cores over SSH, Slurm when no host has idle cores)
     if (mode.chosen) return;
-    mode.value = m;
-    for (const input of el.querySelectorAll('input[type=radio]')) input.checked = input.value === m;
+    mode.value = m === 'cpu' ? cpuDefaults.mode : m;
+    for (const input of el.querySelectorAll('input[type=radio]')) input.checked = input.value === mode.value;
     update();
   };
   return { el, value, setMode };
 }
+
+const cpuText = (r) => (r.mode === 'cpu' ? `${r.cpus} cores on ${r.host} (over SSH)` : `a Slurm job of ${r.cpus} cores`);
 
 export async function launch(request, onDone) {
   // POST the job; on a conflict (another job on the run) ask before launching anyway
@@ -105,7 +117,7 @@ export async function viewerFitModal(info, ghost, onDone) {
   const ghostSelect = h('select', {}, ['on', 'off'].map((g) => h('option', { value: g, selected: g === ghost }, `ghost mask ${g}`)));
   const fitTheta = h('input', { type: 'checkbox' });
   const pupil = h('select', {}, ['hexagon', 'circle'].map((s) => h('option', { value: s, selected: s === o.default_pupil_shape }, s)));
-  const editor = resourcesEditor(o.default_resources, o.free_gpus, o.cpu_resources);
+  const editor = resourcesEditor(o.default_resources, o.free_gpus, o.cpu_resources, o.free_cores);
   const matched = Object.entries(o.matched || {}).filter(([f, r]) => f !== r).map(([f, r]) => `${f} → ${r ?? 'none (median wavelength)'}`);
   const warnings = [
     !o.has_x_position && o.n_images <= 3 * o.fibers.length ? 'few stacks per fiber at one stage position: the from-scratch mode is weakly constrained, prefer seeded' : null,
@@ -152,7 +164,7 @@ export async function jointFitModal(info, ghost) {
   if (data.reason || !data.device) { toast(data.reason || 'this run is not under the data root: it cannot be analysed here', true); return; }
   const steps = ['fit', ...(ghost === 'on' ? ['ghost_mask', 'refit'] : [])].filter((s) => data.steps.includes(s));
   const withSeries = h('input', { type: 'checkbox' });
-  const editor = resourcesEditor(data.default_resources, data.free_gpus, data.cpu_resources);
+  const editor = resourcesEditor(data.default_resources, data.free_gpus, data.cpu_resources, data.free_cores);
   modal(h('div', {},
     h('h3', {}, 'Run the joint fit?'),
     h('p', {}, `${info.name} has no joint fit. Every spot model needs its theta and pupil scales. This runs the steps `,
@@ -192,11 +204,11 @@ async function variantCard(info) {
     if (Number(lbdaStep.value) !== v.fit.lbda_coarse_step_nm) out.lbda_coarse_step_nm = Number(lbdaStep.value);
     return out;
   };
-  const editor = resourcesEditor(v.default_resources, v.free_gpus, v.cpu_resources);
+  const editor = resourcesEditor(v.default_resources, v.free_gpus, v.cpu_resources, v.free_cores);
   const sync = () => {
     const f = fitChanges().fnum;
     if (!edited) suffix.value = `${source.value.replace('_', '')}-${aperture.value}${f ? `-f${String(f).replace('.', 'p')}` : ''}`;
-    editor.setMode(v.gpu_sources.includes(source.value) && v.default_resources.mode === 'gpu' ? 'gpu' : 'slurm');
+    editor.setMode(v.gpu_sources.includes(source.value) && v.default_resources.mode === 'gpu' ? 'gpu' : 'cpu');
   };
   source.onchange = sync;
   aperture.onchange = sync;
@@ -254,8 +266,8 @@ export async function renderAnalyses(body, info) {
     return h('label', { title: STEP_HELP[step] || '' }, box, ' ', step, info.steps_done.includes(step) ? h('span', { class: 'badge ok', style: 'margin-left:4px' }, 'done') : null);
   });
   const selected = () => boxes.map((l) => l.querySelector('input')).filter((b) => b.checked).map((b) => b.value);
-  const editor = resourcesEditor(data.default_resources, data.free_gpus, data.cpu_resources);
-  const syncMode = () => editor.setMode(selected().some((s) => GPU_STEPS.includes(s)) && data.default_resources.mode === 'gpu' ? 'gpu' : 'slurm');
+  const editor = resourcesEditor(data.default_resources, data.free_gpus, data.cpu_resources, data.free_cores);
+  const syncMode = () => editor.setMode(selected().some((s) => GPU_STEPS.includes(s)) && data.default_resources.mode === 'gpu' ? 'gpu' : 'cpu');
   for (const l of boxes) l.querySelector('input').addEventListener('change', syncMode);
   const setAll = (pick) => () => { for (const l of boxes) { const b = l.querySelector('input'); b.checked = pick(b.value); } syncMode(); };
   syncMode();
@@ -285,9 +297,9 @@ export async function renderAnalyses(body, info) {
     h('div', { class: 'card' }, h('h3', {}, 'Other analyses'),
       h('div', { class: 'row' }, data.extras.map((extra) => h('button', {
         onclick: () => launch({ run: info.key, analysis: extra, ghost, resources: data.cpu_resources }, refreshJobs),
-        title: `Slurm job of ${data.cpu_resources.cpus} cores`,
+        title: cpuText(data.cpu_resources),
       }, `run_${extra}`))),
-      h('div', { class: 'small muted', style: 'margin-top:4px' }, `Each runs as a Slurm job of ${data.cpu_resources.cpus} cores.`)),
+      h('div', { class: 'small muted', style: 'margin-top:4px' }, `Each runs as ${cpuText(data.cpu_resources)}.`)),
     h('div', { class: 'card' }, h('h3', {}, 'Jobs of this run'), jobsList));
   root.insertBefore(await variants, root.lastChild);
   refreshJobs();

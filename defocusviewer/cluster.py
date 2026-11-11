@@ -1,6 +1,7 @@
-"""Cluster usage for the panel and for job defaults: GPUs and cores of the GPU hosts, Slurm nodes and our jobs, sampled
-in the background (one snapshot shared by every page)."""
+"""Cluster usage for the panel and for job defaults: GPUs and cores of the GPU hosts, cores of the CPU hosts, Slurm
+nodes and our jobs, sampled in the background (one snapshot shared by every page)."""
 import json
+import math
 import os
 import re
 import socket
@@ -13,7 +14,7 @@ from DefocusTest.psf_batch import GPU_HOST_LIMITS, GPU_MIN_FREE_MB
 
 from .config import Config
 
-HOST_PERIOD_S, SLURM_PERIOD_S = 15, 30
+HOST_PERIOD_S, SLURM_PERIOD_S = 15, 60   # Slurm answers are cached for 2 min anyway (amkit.resources.SLURM_TTL)
 JOB_COMMAND = re.compile(r"(DefocusTest\.analysis\.run_\w+|defocusviewer jointfit)\s+(\S+)(.*)")
 
 
@@ -26,6 +27,8 @@ def master_up(host: str) -> bool:
 
 def host_state(host: str) -> dict:
     """GPUs (with the ones a job of ours may take now) and cores of one host; `reachable` False when SSH fails."""
+    if resources.is_restricted(None if resources.is_local(host) else host):
+        return {"host": host, "reachable": False, "hint": "restricted: allow with AMKIT_ALLOW_HOSTS"}
     if not master_up(host):
         return {"host": host, "reachable": False, "hint": f"ssh master down: run `ssh -fN {host}` in a terminal"}
     cpu = resources.cpu_status(None if resources.is_local(host) else host)
@@ -38,6 +41,20 @@ def host_state(host: str) -> dict:
     processes = [p for p in resources.gpu_processes(target) if p["uid"] == os.getuid()]
     return {"host": host, "reachable": True, **cpu, "gpus": gpus, "gpu_error": not gpus, "free_gpus": free, "cap": cap,
             "our_processes": processes}
+
+
+def cpu_host_state(host: str, margin: int, mem_per_core_gb: float = 2) -> dict:
+    """Cores, load and memory of a CPU host, with `free_cores`: idle cores minus `margin`, at most one per
+    `mem_per_core_gb` of available memory."""
+    if resources.is_restricted(None if resources.is_local(host) else host):
+        return {"host": host, "reachable": False, "hint": "restricted: allow with AMKIT_ALLOW_HOSTS"}
+    if not master_up(host):
+        return {"host": host, "reachable": False, "hint": f"ssh master down: run `ssh -fN {host}` in a terminal"}
+    cpu = resources.cpu_status(None if resources.is_local(host) else host)
+    if cpu is None:
+        return {"host": host, "reachable": False, "hint": "no answer over ssh"}
+    free = min(cpu["cores"] - math.ceil(cpu["load1"]) - margin, int(cpu["mem_available_gb"] // mem_per_core_gb))
+    return {"host": host, "reachable": True, **cpu, "free_cores": max(0, free)}
 
 
 def process_tree(host: str) -> dict[int, tuple[int, str]]:
@@ -113,11 +130,11 @@ def _mem_mb(text: str) -> int:
 
 
 class Sampler:
-    """Background sampling of the GPU hosts every 15 s and of Slurm every 30 s."""
+    """Background sampling of the GPU and CPU hosts every 15 s and of Slurm every 30 s."""
 
     def __init__(self, config: Config):
         self.config = config
-        self.hosts, self.slurm, self.updated, self.ours = {}, {"nodes": [], "jobs": {}}, {}, []
+        self.hosts, self.cpu, self.slurm, self.updated, self.ours = {}, {}, {"nodes": [], "jobs": {}}, {}, []
         self._lock = threading.Lock()
 
     def start(self):
@@ -136,6 +153,13 @@ class Sampler:
                     state = {"host": host, "reachable": False, "hint": str(e)[:200]}
                 with self._lock:
                     self.hosts[host], self.updated["hosts"] = state, time.time()
+            for host in self.config.cpu_hosts:
+                try:
+                    state = cpu_host_state(host, self.config.cpu_margin)
+                except (OSError, subprocess.SubprocessError, ValueError) as e:
+                    state = {"host": host, "reachable": False, "hint": str(e)[:200]}
+                with self._lock:
+                    self.cpu[host], self.updated["cpu_hosts"] = state, time.time()
             with self._lock:
                 hosts = dict(self.hosts)
             ours = our_gpus(hosts, trees, self._jobs()) if trees else []
@@ -158,9 +182,11 @@ class Sampler:
             time.sleep(SLURM_PERIOD_S)
 
     def snapshot(self) -> dict:
-        """Hosts, Slurm nodes and partitions (cores idle and usable at the default memory per core), our Slurm jobs."""
+        """GPU and CPU hosts, Slurm nodes and partitions (cores idle and usable at the default memory per core), our
+        Slurm jobs."""
         with self._lock:
             hosts = [self.hosts.get(h, {"host": h, "reachable": None}) for h in self.config.gpu_hosts]
+            cpu_hosts = [self.cpu.get(h, {"host": h, "reachable": None}) for h in self.config.cpu_hosts]
             nodes, jobs, updated = list(self.slurm["nodes"]), dict(self.slurm["jobs"]), dict(self.updated)
             ours = list(self.ours)
         mem_per_cpu = _mem_mb(self.config.slurm_mem_per_cpu)
@@ -173,7 +199,7 @@ class Sampler:
                 p["nodes"] += 1
                 for k in ("cpus_total", "cpus_allocated", "cpus_idle", "usable"):
                     p[k] += node[k]
-        return {"hosts": hosts, "nodes": nodes, "partitions": list(partitions.values()), "jobs": jobs, "our_gpus": ours,
+        return {"hosts": hosts, "cpu_hosts": cpu_hosts, "nodes": nodes, "partitions": list(partitions.values()), "jobs": jobs, "our_gpus": ours,
                 "updated": updated, "mem_per_cpu_mb": mem_per_cpu, "this_host": socket.gethostname(),
                 "user": os.environ.get("USER", "")}
 
@@ -181,3 +207,8 @@ class Sampler:
         """{host: GPU indices a job of ours may take now}, in the configured host order."""
         with self._lock:
             return {h: list(s.get("free_gpus", [])) for h in self.config.gpu_hosts if (s := self.hosts.get(h))}
+
+    def free_cores(self) -> dict[str, int]:
+        """{host: cores a CPU job of ours may take now}, in the configured host order."""
+        with self._lock:
+            return {h: s.get("free_cores", 0) for h in self.config.cpu_hosts if (s := self.cpu.get(h))}

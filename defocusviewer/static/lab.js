@@ -268,5 +268,5 @@ export async function renderLab() {
     rigCard(snapshot));
   root.replaceChildren(monitor, form.el);
   clearTimeout(timer);
-  timer = setTimeout(() => { if (root.classList.contains('active')) renderLab(); }, 10000);
+  timer = setTimeout(() => { if (root.classList.contains('active')) renderLab(); }, 30000);
 }

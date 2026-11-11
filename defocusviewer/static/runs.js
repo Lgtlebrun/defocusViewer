@@ -203,7 +203,7 @@ function remotePanel(info) {
   return h('div', { class: 'pad' },
     h('h2', {}, info.name),
     h('p', {}, `Only on pos-control (${info.group}), ${info.finished ? 'finished' : 'not finished: the copy takes what is there now'}.`),
-    h('p', { class: 'muted' }, 'Fetch copies it with rsync into the local data root (never deletes anything). Fetch + analyse then runs the default analysis of its flow: on up to 2 idle GPUs if there are any, else as a Slurm job of 10 cores.'),
+    h('p', { class: 'muted' }, 'Fetch copies it with rsync into the local data root (never deletes anything). Fetch + analyse then runs the default analysis of its flow: on up to 2 idle GPUs if there are any, else on up to 32 cores of the CPU host with the most idle ones (over SSH), else as a Slurm job of 10 cores.'),
     h('div', { class: 'row' },
       h('button', { onclick: () => fetchRun(false) }, 'Fetch'),
       h('button', { class: 'primary', onclick: () => fetchRun(true) }, 'Fetch + analyse'), ghost));

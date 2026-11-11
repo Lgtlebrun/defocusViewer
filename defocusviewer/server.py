@@ -121,6 +121,13 @@ def checked_resources(config: Config, res: dict) -> dict:
             bad("launch_host")
         return {"mode": "gpu", "n_gpus": n_gpus, "gpu_hosts": hosts, "cpu_workers": workers,
                 "launch_host": res["launch_host"]}
+    if mode == "cpu":
+        cpus = int(res.get("cpus", 0))
+        if res.get("host") not in config.cpu_hosts:
+            bad("host")
+        if not 1 <= cpus <= 384:
+            bad("cpus")
+        return {"mode": "cpu", "host": res["host"], "cpus": cpus}
     if mode == "slurm":
         cpus, time = int(res.get("cpus", 0)), res.get("time") or None
         if not 1 <= cpus <= 128 or res.get("partition") not in PARTITIONS:
@@ -150,7 +157,7 @@ def create_app(config: Config, token: str, background: bool = True) -> FastAPI:
 
     def fetching(run: str) -> str | None:
         """Why the rundir is incomplete when a fetch job is still copying it (rsync fills data/ before meta/), else None."""
-        for job in registry.refresh():
+        for job in registry.all():
             if (job["run"] == run and job["label"].startswith("fetch") and job["state"] in ("running", "pending")
                     and f"fetched {run}" not in jobs.job_tail(job)):
                 return (f"job {job['id']} ({job['label']}, started {job['started'].replace('T', ' ')}) is still copying "
@@ -168,6 +175,7 @@ def create_app(config: Config, token: str, background: bool = True) -> FastAPI:
         remote.start()
         sampler.start()
         rig.start()
+        registry.start_refresher()
         for _ in range(config.refit_workers):     # the first spot fit then finds warm workers
             fit_pool().submit(spots.warm_up)
 
@@ -215,7 +223,8 @@ def create_app(config: Config, token: str, background: bool = True) -> FastAPI:
     @app.get("/api/config")
     def settings():
         return {"gpu_hosts": config.gpu_hosts, "job_gpu_hosts": config.job_gpu_hosts,
-                "launch_hosts": config.launch_hosts, "partitions": PARTITIONS, "data_root": str(config.data_root)}
+                "launch_hosts": config.launch_hosts, "cpu_hosts": config.cpu_hosts, "cpu_cores": config.cpu_cores,
+                "slurm": jobs.slurm_resources(config), "partitions": PARTITIONS, "data_root": str(config.data_root)}
 
     @app.get("/api/runs")
     def runs():
@@ -373,17 +382,20 @@ def create_app(config: Config, token: str, background: bool = True) -> FastAPI:
             refits["inflight"].pop(key, None)
         return await asyncio.to_thread(cached_detail, path, request.run, request.img, ghost)
 
+    def resource_options(uses_gpu: bool) -> dict:
+        """Free GPUs and cores now, the default resources of the job and those of a CPU-only one."""
+        free, cores = sampler.free_gpus(), sampler.free_cores()
+        return {"free_gpus": free, "free_cores": cores, "default_resources": jobs.default_resources(config, free, uses_gpu, cores),
+                "cpu_resources": jobs.default_resources(config, free, False, cores)}
+
     @app.get("/api/analyses")
     def run_analyses(run: str, ghost: str = "on"):
         path = run_path(run)
         if reason := fetching(run):
             return {"flow": None, "reason": reason, "steps": [], "default_steps": [], "extras": [], "viewer_joint_fit": False}
         info = jobs.analyses(path, _ghost(ghost))
-        free = sampler.free_gpus()
         uses_gpu = bool(set(info["default_steps"]) & jobs.GPU_STEPS)
-        return {**info, "device": catalog.device_of(config, run), "free_gpus": free,
-                "default_resources": jobs.default_resources(config, free, uses_gpu),
-                "cpu_resources": jobs.default_resources(config, free, False)}
+        return {**info, "device": catalog.device_of(config, run), **resource_options(uses_gpu)}
 
     @app.post("/api/jobs")
     def start_job(request: JobRequest):
@@ -416,9 +428,7 @@ def create_app(config: Config, token: str, background: bool = True) -> FastAPI:
     @app.get("/api/jointfit/options")
     def jointfit_options(run: str):
         run_path(run)
-        free = sampler.free_gpus()
-        return {**jointfit.options(config, run), "free_gpus": free, "default_resources": jobs.default_resources(config, free, True),
-                "cpu_resources": jobs.default_resources(config, free, False)}
+        return {**jointfit.options(config, run), **resource_options(True)}
 
     @app.post("/api/jointfit")
     def start_jointfit(request: JointFitRequest):
@@ -443,11 +453,8 @@ def create_app(config: Config, token: str, background: bool = True) -> FastAPI:
     @app.get("/api/variants")
     def run_variants(run: str):
         run_path(run)
-        free = sampler.free_gpus()
         return {"family": variants.family(config, run), "sources": sorted(fit.SOURCE_MODELS), "apertures": psf.PUPIL_SHAPES,
-                "fit": variants.fit_settings(config, run),
-                "gpu_sources": psf_batch.BATCH_MODELS, "default_resources": jobs.default_resources(config, free, True),
-                "cpu_resources": jobs.default_resources(config, free, False), "free_gpus": free}
+                "fit": variants.fit_settings(config, run), "gpu_sources": psf_batch.BATCH_MODELS, **resource_options(True)}
 
     @app.post("/api/variants")
     def create_variant(request: VariantRequest):
@@ -486,7 +493,7 @@ def create_app(config: Config, token: str, background: bool = True) -> FastAPI:
 
     @app.get("/api/jobs")
     def list_jobs():
-        return registry.refresh()
+        return registry.all()
 
     @app.get("/api/jobs/{job_id}/log", response_class=PlainTextResponse)
     def job_log(job_id: str):
