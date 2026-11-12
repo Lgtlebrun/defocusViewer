@@ -195,6 +195,7 @@ async function variantCard(info) {
   const lbdaLo = num(v.fit.lbda_range_nm[0], 10);
   const lbdaHi = num(v.fit.lbda_range_nm[1], 10);
   const lbdaStep = num(v.fit.lbda_coarse_step_nm, 1);
+  const oversample = h('input', { type: 'number', value: v.fit.image_oversample, min: 1, max: 4, step: 1, style: 'width:4em' });
   const fitChanges = () => {
     const out = {};
     if (Number(fnum.value) !== v.fit.fnum) out.fnum = Number(fnum.value);
@@ -202,17 +203,19 @@ async function variantCard(info) {
       out.lbda_range_nm = [Number(lbdaLo.value), Number(lbdaHi.value)];
     }
     if (Number(lbdaStep.value) !== v.fit.lbda_coarse_step_nm) out.lbda_coarse_step_nm = Number(lbdaStep.value);
+    if (Number(oversample.value) !== v.fit.image_oversample) out.image_oversample = Number(oversample.value);
     return out;
   };
   const editor = resourcesEditor(v.default_resources, v.free_gpus, v.cpu_resources, v.free_cores);
   const sync = () => {
-    const f = fitChanges().fnum;
-    if (!edited) suffix.value = `${source.value.replace('_', '')}-${aperture.value}${f ? `-f${String(f).replace('.', 'p')}` : ''}`;
+    const { fnum: f, image_oversample: os } = fitChanges();
+    if (!edited) suffix.value = `${source.value.replace('_', '')}-${aperture.value}${f ? `-f${String(f).replace('.', 'p')}` : ''}${os ? `-os${os}` : ''}`;
     editor.setMode(v.gpu_sources.includes(source.value) && v.default_resources.mode === 'gpu' ? 'gpu' : 'cpu');
   };
   source.onchange = sync;
   aperture.onchange = sync;
   fnum.oninput = sync;
+  oversample.oninput = sync;
   sync();
   const open = (key) => { setHash({ run: key }); window.dispatchEvent(new PopStateEvent('popstate')); };
   const members = v.family.map((m) => h('tr', { class: m.key === info.key ? 'selected' : '' },
@@ -225,6 +228,8 @@ async function variantCard(info) {
     h('div', { class: 'row' }, 'source ', source, ' aperture ', aperture, ghost, ' suffix ', suffix),
     h('div', { class: 'row', title: 'The pupil radius goes as 1 / (lambda x f-number): the wavelength fit absorbs a working f-number off the nominal one, as long as the lambda range is wide enough. Change these when the iris was moved and the run\'s config kept the old f-number.' },
       'f-number ', fnum, ' lambda range ', lbdaLo, '-', lbdaHi, ' nm, coarse step ', lbdaStep, ' nm'),
+    h('div', { class: 'row', title: 'Image oversampling of the PSF model (fit.image_oversample): PSF and source are sampled every 1/q px and convolved there. At f/1.8 the PSF has fringes finer than a pixel, which the pixel grid (1) aliases; 2 removes that for about 40 % more fit time. tophat_bl and gaussian sources only.' },
+      'image oversampling ', oversample, h('span', { class: 'muted small' }, ' (1 = pixel grid, 2 for f/1.8)')),
     h('div', { style: 'margin:6px 0' }, editor.el),
     h('div', { class: 'row' }, h('span', { class: 'spacer' }), h('button', { class: 'primary', onclick: async () => {
       try {

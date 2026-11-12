@@ -11,6 +11,7 @@ from pathlib import Path
 import yaml
 from DefocusTest.fit import SOURCE_MODELS
 from DefocusTest.psf import PUPIL_SHAPES, split_model
+from DefocusTest.psf_batch import BATCH_MODELS
 
 from . import catalog
 from .config import Config
@@ -23,7 +24,10 @@ SUFFIX = re.compile(r"^[A-Za-z0-9][\w-]{0,40}$")
 # lambda range lets the joint fit absorb the working f-number of an iris set by hand
 FIT_LIMITS = {"fnum": (0.5, 32.0), "lbda_coarse_step_nm": (0.5, 50.0)}
 LBDA_LIMITS = (300.0, 1100.0)
-FIT_DEFAULTS = {"fnum": 8.0, "lbda_range_nm": [600.0, 700.0], "lbda_coarse_step_nm": 5.0}
+# image oversampling of the matrix PSF engine (DefocusTest fit.image_oversample): PSF and source sampled every 1/q px;
+# 2 removes the aliasing of the f/1.8 PSF, whose fringes are finer than a pixel
+OVERSAMPLE_LIMITS = (1, 4)
+FIT_DEFAULTS = {"fnum": 8.0, "lbda_range_nm": [600.0, 700.0], "lbda_coarse_step_nm": 5.0, "image_oversample": 1}
 
 
 def family(config: Config, key: str) -> list[dict]:
@@ -74,7 +78,10 @@ def fit_settings(config: Config, key: str) -> dict:
     out = {}
     for name, default in FIT_DEFAULTS.items():
         value = fit_config.get(name, default)
-        out[name] = [float(v) for v in value] if isinstance(default, list) else float(value)
+        if isinstance(default, list):
+            out[name] = [float(v) for v in value]
+        else:
+            out[name] = int(value) if isinstance(default, int) else float(value)
     return out
 
 
@@ -92,8 +99,13 @@ def checked_fit(fit: dict | None) -> dict:
             if not lo <= float(value) <= hi:
                 raise ValueError(f"{name}: within {lo:g}-{hi:g}")
             out[name] = float(value)
+        elif name == "image_oversample":
+            lo, hi = OVERSAMPLE_LIMITS
+            if isinstance(value, bool) or float(value) != int(float(value)) or not lo <= int(float(value)) <= hi:
+                raise ValueError(f"image_oversample: an integer within {lo}-{hi}")
+            out[name] = int(float(value))
         else:
-            raise ValueError(f"fit settings a variant may change: {', '.join(['lbda_range_nm', *FIT_LIMITS])}")
+            raise ValueError(f"fit settings a variant may change: {', '.join(['lbda_range_nm', *FIT_LIMITS, 'image_oversample'])}")
     return out
 
 
@@ -105,6 +117,8 @@ def create(config: Config, key: str, suffix: str, source: str, aperture: str, gh
         raise ValueError("suffix: letters, digits, '-' and '_', at most 41 characters")
     model = model_name(source, aperture)
     fit = checked_fit(fit)
+    if fit.get("image_oversample", 1) > 1 and source not in BATCH_MODELS:
+        raise ValueError(f"image_oversample > 1 needs a source among {', '.join(BATCH_MODELS)}")
     root = parent(config, key) or key
     path = catalog.resolve(config, root)
     target = path.parent / f"{path.name}_{suffix}"
@@ -121,6 +135,8 @@ def create(config: Config, key: str, suffix: str, source: str, aperture: str, gh
         settings["fit"]["model"] = model
         settings["fit"]["ghost_mask"] = ghost == "on"
         settings["fit"].update(fit)
+        if int(settings["fit"].get("image_oversample", 1)) > 1 and source not in BATCH_MODELS:      # from the run's config
+            settings["fit"]["image_oversample"] = 1
         (target / "meta" / "config.yaml").write_text(yaml.safe_dump(_plain(settings), sort_keys=False))
         (target / "meta" / PROVENANCE).write_text(json.dumps({
             "parent": root, "model": model, "source": source, "aperture": aperture, "ghost": ghost, "fit": fit,

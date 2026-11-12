@@ -35,7 +35,8 @@ def test_variant_shares_the_data_and_starts_without_analysis(config, rundir):
 
 
 def test_variant_fit_settings(config, rundir):
-    assert variants.fit_settings(config, RUN) == {"fnum": 4.0, "lbda_range_nm": [600.0, 700.0], "lbda_coarse_step_nm": 5.0}
+    assert variants.fit_settings(config, RUN) == {"fnum": 4.0, "lbda_range_nm": [600.0, 700.0], "lbda_coarse_step_nm": 5.0,
+                                                  "image_oversample": 1}
     fit = {"fnum": 1.8, "lbda_range_nm": [560, 900], "lbda_coarse_step_nm": 10}
     key = variants.create(config, RUN, "tophatbl-circle-f1p8", "tophat_bl", "circle", "off", fit)
     path = catalog.resolve(config, key)
@@ -45,7 +46,18 @@ def test_variant_fit_settings(config, rundir):
     assert json.loads((path / "meta" / "variant.json").read_text())["fit"]["fnum"] == 1.8
     assert "fit.fnum=1.8" in (path / "log.log").read_text()
     assert variants.fit_settings(config, key)["lbda_range_nm"] == [560.0, 900.0]
-    for bad in ({"fnum": 0.1}, {"lbda_range_nm": [700, 600]}, {"lbda_range_nm": [200, 600]}, {"zernike_noll": [4, 5]}):
+    for bad in ({"fnum": 0.1}, {"lbda_range_nm": [700, 600]}, {"lbda_range_nm": [200, 600]}, {"zernike_noll": [4, 5]},
+                {"image_oversample": 0}, {"image_oversample": 1.5}, {"image_oversample": 5}):
         with pytest.raises(ValueError):
             variants.create(config, RUN, "bad", "tophat_bl", "circle", "off", bad)
+    with pytest.raises(ValueError):                    # the exact tophat has no oversampled form
+        variants.create(config, RUN, "bad", "tophat", "circle", "off", {"image_oversample": 2})
+
+
+def test_variant_image_oversample(config, rundir):
+    key = variants.create(config, RUN, "tophatbl-circle-os2", "tophat_bl", "circle", "on", {"image_oversample": 2})
+    path = catalog.resolve(config, key)
+    assert catalog.open_rundir(path).loadConfig()["fit"]["image_oversample"] == 2
+    assert variants.fit_settings(config, key)["image_oversample"] == 2
+    assert "fit.image_oversample=2" in (path / "log.log").read_text()
     assert not (path.parent / f"{path.name.split('_tophatbl')[0]}_bad").exists()
