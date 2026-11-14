@@ -9,7 +9,28 @@ const SUBTABS = { spots: 'Spots', fibers: 'Fibers', plots: 'Plots', analyses: 'A
 const DEVICE_ORDER = ['Orbray6', 'MPS6', 'calibration_stand'];
 let runs = [];
 let pinned = new Set();
-let listState = { search: '', remote: true, updated: null, error: null };
+const FILTERS_KEY = 'runFilters';      // where / analysed / tags of the run list, kept per browser
+const WHERE = { all: 'all', local: 'fetched', rig: 'rig only' };
+const ANALYSED = { all: 'all', yes: 'analysed', no: 'not analysed' };
+const FNUM_SOURCES = { config: 'fit.fnum of meta/config.yaml', results: 'results/fnum.npy (viewer joint fit)', 'run name': 'read from the run name' };
+let tagWords = [];
+let listState = { search: '', updated: null, error: null, ...savedFilters() };
+
+function savedFilters() {
+  const out = { where: 'all', analysed: 'all', tags: [] };
+  try {
+    const saved = JSON.parse(localStorage.getItem(FILTERS_KEY)) || {};
+    if (saved.where in WHERE) out.where = saved.where;
+    if (saved.analysed in ANALYSED) out.analysed = saved.analysed;
+    if (Array.isArray(saved.tags)) out.tags = saved.tags.filter((t) => typeof t === 'string');
+  } catch { /* storage blocked or bad JSON */ }
+  return out;
+}
+
+function saveFilters() {
+  const { where, analysed, tags } = listState;
+  try { localStorage.setItem(FILTERS_KEY, JSON.stringify({ where, analysed, tags })); } catch { /* storage blocked */ }
+}
 let shown = { run: null, sub: null };
 
 export const runByKey = (key) => runs.find((r) => r.key === key);
@@ -24,6 +45,7 @@ export async function loadRuns() {
   const [data, pins] = await Promise.all([api('/api/runs'), api('/api/pinned')]);
   pinned = new Set(pins);
   runs = data.runs;
+  tagWords = data.tag_words || [];
   listState.updated = data.remote_updated;
   listState.error = data.remote_error;
   renderList();
@@ -49,6 +71,8 @@ function badges(run) {
   if (!run.local) out.push(h('span', { class: 'badge' }, 'on rig'));
   if (!run.finished) out.push(h('span', { class: 'badge warn' }, 'unfinished'));
   if (run.flow) out.push(h('span', { class: 'badge' }, run.flow));
+  const fnum = (run.tags || []).find(isFnumTag);
+  if (fnum) out.push(h('span', { class: 'badge', title: `f-number: ${FNUM_SOURCES[run.fnum_source] || run.fnum_source}` }, fnum));
   if (run.local && run.flow && !run.joint_fit) out.push(h('span', { class: 'badge warn' }, 'no joint fit'));
   if (run.steps_done?.length) out.push(h('span', { class: 'badge ok', title: run.steps_done.join(', ') }, `${run.steps_done.length} steps`));
   if (run.steps_done?.includes('ghost_mask')) out.push(h('span', { class: 'badge' }, 'ghost masks'));
@@ -79,16 +103,74 @@ function matchesSearch(run, terms) {
   return terms.every((t) => text.includes(t));
 }
 
+const isFnumTag = (tag) => tag.startsWith('f/');
+const facetOf = (tag) => (isFnumTag(tag) ? 'fnum' : 'kind');
+
+function passesStatus(run) {
+  if ((listState.where === 'local' && !run.local) || (listState.where === 'rig' && run.local)) return false;
+  return listState.analysed === 'all' || (listState.analysed === 'yes') === Boolean(run.analysed);
+}
+
+function passesTags(run, skipFacet = null) {
+  // selected tags: any of a facet (kind of test, f-number), and both facets when both have some
+  for (const facet of ['kind', 'fnum']) {
+    if (facet === skipFacet) continue;
+    const wanted = listState.tags.filter((t) => facetOf(t) === facet);
+    if (wanted.length && !wanted.some((t) => (run.tags || []).includes(t))) return false;
+  }
+  return true;
+}
+
+function passes(run, terms, skipFacet = null) {
+  return passesStatus(run) && passesTags(run, skipFacet) && (!terms.length || matchesSearch(run, terms));
+}
+
+function segmented(choices, value, onPick) {
+  return h('span', { class: 'seg' }, Object.entries(choices).map(([key, label]) =>
+    h('button', { class: key === value ? 'on' : '', onclick: () => onPick(key) }, label)));
+}
+
+function filterBar(terms) {
+  // tag chips (counts: the runs the other filters keep that have the tag), then where / analysed
+  const present = new Set(runs.flatMap((r) => r.tags || []));
+  const fnums = [...present].filter(isFnumTag).sort((a, b) => parseFloat(a.slice(2)) - parseFloat(b.slice(2)));
+  const kinds = [...tagWords.filter((t) => present.has(t)), ...[...present].filter((t) => !isFnumTag(t) && !tagWords.includes(t)).sort()];
+  const chip = (tag) => {
+    const on = listState.tags.includes(tag);
+    const n = runs.filter((r) => (r.tags || []).includes(tag) && passes(r, terms, facetOf(tag))).length;
+    return h('button', {
+      class: `chip${on ? ' on' : ''}`, disabled: !n && !on,
+      title: isFnumTag(tag) ? `f-number ${tag.slice(2)} (local runs: fit.fnum of the config; runs on the rig: their name)` : `"${tag}" in the run name or its hold routine`,
+      onclick: () => {
+        listState.tags = on ? listState.tags.filter((t) => t !== tag) : [...listState.tags, tag];
+        saveFilters();
+        renderList();
+      },
+    }, tag, ' ', h('span', { class: 'muted' }, n));
+  };
+  const set = (field) => (value) => { listState[field] = value; saveFilters(); renderList(); };
+  const active = listState.tags.length || listState.where !== 'all' || listState.analysed !== 'all';
+  const clear = active ? h('button', { class: 'small', onclick: () => {
+    Object.assign(listState, { where: 'all', analysed: 'all', tags: [] });
+    saveFilters();
+    renderList();
+  } }, 'clear filters') : null;
+  return h('div', { class: 'run-filters' },
+    h('div', { class: 'chips' }, kinds.map(chip)),
+    h('div', { class: 'chips' }, fnums.map(chip)),
+    h('div', { class: 'row', style: 'gap:6px' }, segmented(WHERE, listState.where, set('where')), clear),
+    h('div', { class: 'row', style: 'gap:6px' }, segmented(ANALYSED, listState.analysed, set('analysed'))));
+}
+
 function renderList() {
   const aside = document.getElementById('run-list');
   const opened = openGroups();
   const search = listState.search.trim().toLowerCase();
   const terms = search.split(/\s+/).filter(Boolean);
+  const forceOpen = terms.length > 0 || listState.tags.length > 0;     // a search or a tag shows its matches, whatever the folding
   const groups = {};
   for (const run of runs) {
-    if (!run.local && !listState.remote) continue;
-    if (terms.length && !matchesSearch(run, terms)) continue;
-    (groups[run.group] ||= []).push(run);
+    if (passes(run, terms)) (groups[run.group] ||= []).push(run);
   }
   const oldBox = aside.querySelector('input[type=text]');
   const keepFocus = oldBox && document.activeElement === oldBox ? [oldBox.selectionStart, oldBox.selectionEnd] : null;
@@ -108,19 +190,19 @@ function renderList() {
       h('span', { class: 'name', style: 'flex:1' }, label), star),
     h('div', { class: 'badges' }, badges(run)));
   };
-  const pinnedRuns = runs.filter((r) => pinned.has(r.key) && (!terms.length || matchesSearch(r, terms)));
+  const pinnedRuns = runs.filter((r) => pinned.has(r.key) && passes(r, terms));
   const pinnedGroup = pinnedRuns.length ? h('details', { class: 'group', open: true },
     h('summary', {}, '★ Pinned ', h('span', { class: 'muted small' }, `${pinnedRuns.length}`)),
     pinnedRuns.sort((a, b) => b.name.localeCompare(a.name)).map((r) => runItem(r))) : null;
   const children = Object.keys(groups).sort((a, b) => groupOrder(a) - groupOrder(b) || a.localeCompare(b)).map((group) => {
     const items = groups[group].sort((a, b) => b.name.localeCompare(a.name));
     const nLocal = items.filter((r) => r.local).length;
-    const isOpen = terms.length > 0 || (opened[group] ?? (nLocal > 0));    // a filter shows its matches, whatever the folding
+    const isOpen = forceOpen || (opened[group] ?? (nLocal > 0));
     const details = h('details', { class: 'group', open: isOpen },
       h('summary', {}, `${group} `, h('span', { class: 'muted small' }, `${nLocal} local, ${items.length - nLocal} on rig`)),
       withVariants(items, runItem));
     details.addEventListener('toggle', () => {
-      if (terms.length) return;     // opened by the filter, not by the user
+      if (forceOpen) return;     // opened by the filter, not by the user
       const state = openGroups();
       state[group] = details.open;
       try { localStorage.setItem('openGroups', JSON.stringify(state)); } catch { /* storage blocked */ }
@@ -129,16 +211,16 @@ function renderList() {
   });
   const searchBox = h('input', { type: 'text', placeholder: 'filter runs', value: listState.search, style: 'width:100%' });
   searchBox.oninput = () => { listState.search = searchBox.value; renderList(); };
-  const remoteToggle = h('input', { type: 'checkbox', checked: listState.remote });
-  remoteToggle.onchange = () => { listState.remote = remoteToggle.checked; renderList(); };
   const refresh = h('button', { class: 'small', onclick: async () => { await post('/api/remote/refresh'); toast('Listing pos-control again (a few seconds)'); setTimeout(loadRuns, 5000); } }, 'refresh');
+  const nShown = Object.values(groups).reduce((n, items) => n + items.length, 0);
   aside.replaceChildren(
     searchBox,
+    filterBar(terms),
     h('div', { class: 'row small muted', style: 'margin:6px 0' },
-      h('label', {}, remoteToggle, ' runs on pos-control'), h('span', { class: 'spacer' }), refresh),
-    h('div', { class: 'small muted', style: 'margin-bottom:6px' },
-      listState.error ? `pos-control: ${listState.error}` : `pos-control listed ${ago(listState.updated)}`),
-    pinnedGroup, ...children);
+      h('span', {}, listState.error ? `pos-control: ${listState.error}` : `pos-control listed ${ago(listState.updated)}`),
+      h('span', { class: 'spacer' }), refresh),
+    pinnedGroup, ...children,
+    nShown ? null : h('p', { class: 'small muted' }, 'No run matches the filters.'));
   if (keepFocus) {      // the box is rebuilt with the list: put the caret back where it was (also on the 30 s refresh)
     searchBox.focus();
     searchBox.setSelectionRange(...keepFocus);

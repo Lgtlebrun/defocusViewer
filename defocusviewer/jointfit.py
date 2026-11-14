@@ -13,7 +13,6 @@ With ghost "on" the ghost hunt of the pipeline follows: unmasked fit, ghost boxe
 (postprocessing.fiber_ghost_table), masked fit seeded by the unmasked one.
 """
 import json
-import re
 from datetime import datetime
 from pathlib import Path
 
@@ -33,28 +32,10 @@ MODES = ("seeded", "scratch", "reuse")
 PROVENANCE = "viewer_joint_fit.json"
 MATCH_TOLERANCE_PX = 50          # a fiber is matched to the reference's nearest spot within this distance on the sensor
 C4_GRID = np.arange(-4.0, 4.01, 0.25)
-FNUM_IN_NAME = (r"fnum[-_]?(\d+(?:p\d+)?)", r"apf(\d+(?:p\d+)?)", r"(?:^|[-_])f(\d+(?:p\d+)?)(?:[-_]|$)")
 # fit settings when there is no reference: those of the f/4 stability runs (meta/config.yaml, fit section, 2026-10)
 DEFAULT_SETTINGS = dict(model="tophat_bl", engine="matrix", noll=(4, 5, 6, 7, 8), crop_side=121, supersample=32,
                         psf_oversample=2, n_rounds=2, lbda_range_nm=(600.0, 700.0), lbda_coarse_step_nm=5.0,
                         lbda_fine_step_nm=0.5, theta_fine_step=0.1, hex_scale_fine_step=0.005)
-
-
-def guess_fnum(path: Path) -> tuple[float | None, str]:
-    """(f-number, where it was read): config fit.fnum, results/fnum.npy, the run name (fnum4, apf1p8, f8), else None."""
-    config = path / "meta" / "config.yaml"
-    if config.exists():
-        fnum = (catalog.open_rundir(path).loadConfig().get("fit") or {}).get("fnum")
-        if fnum:
-            return float(fnum), "config"
-    if (path / "results" / "fnum.npy").exists():
-        return float(np.atleast_1d(np.load(path / "results" / "fnum.npy"))[0]), "results"
-    slug = path.name.split("_", 1)[-1].lower()
-    for pattern in FNUM_IN_NAME:
-        found = re.search(pattern, slug)
-        if found:
-            return float(found.group(1).replace("p", ".")), "run name"
-    return None, "unknown"
 
 
 def _time(name: str) -> datetime | None:
@@ -67,14 +48,14 @@ def _time(name: str) -> datetime | None:
 def references(config: Config, key: str) -> list[dict]:
     """Local runs with a joint fit that can seed this one: same device, same f-number first, then nearest in time."""
     path = catalog.resolve(config, key)
-    fnum, _ = guess_fnum(path)
+    fnum, _ = catalog.guess_fnum(path)
     when = _time(path.name)
     device = key.split("/")[0]
     out = []
     for other, other_path in catalog.local_runs(config).items():
         if other == key or other.split("/")[0] != device or not (other_path / "results" / "theta_shared.npy").exists():
             continue
-        other_fnum, _ = guess_fnum(other_path)
+        other_fnum, _ = catalog.guess_fnum(other_path)
         other_when = _time(other_path.name)
         gap = abs((other_when - when).total_seconds()) if when and other_when else float("inf")
         out.append({"key": other, "fnum": other_fnum, "same_fnum": fnum is not None and other_fnum == fnum,
@@ -142,7 +123,7 @@ def options(config: Config, key: str) -> dict:
     fiber matching against the default reference."""
     path = catalog.resolve(config, key)
     df = spot_table(path)
-    fnum, source = guess_fnum(path)
+    fnum, source = catalog.guess_fnum(path)
     refs = references(config, key)
     matched = {}
     if refs:

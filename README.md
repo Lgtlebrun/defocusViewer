@@ -12,6 +12,10 @@ A browser GUI for the Defocus test. It runs as one service on UZH's gpu server a
 - Open the login URL once per browser. Print it with `defocusviewer url` (from `~/Defocus/.venv`). It sets a cookie; every other request needs it.
 - The service runs in tmux session `defocusviewer`. A crontab line restarts it when it stops answering: `defocusviewer ensure`, every 5 min.
 - The server log is in `/disk/users/llebru/defocusViewer/server.log`.
+- **Run list filters** (left panel, remembered per browser):
+  - Tags: a run gets each word of `run_tags` (stability, tracking, pointing, detection, luminosity) found in its name or naming its hold routine, and `f/<fnum>`. Local runs take the f-number from `fit.fnum` of `meta/config.yaml`; runs on the rig take it from their name. Several tags of one kind match any of them; a test tag and an f-number together match both.
+  - fetched / rig only.
+  - analysed / not analysed: a run counts as analysed when it, or one of its variants, has a joint fit.
 
 ## How it models a spot
 

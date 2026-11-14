@@ -1,6 +1,6 @@
 # Rig watchdog
 
-`defocusviewer watch` follows pos-control. For every StabilityTest, TrackingTest or PointingTest run that finishes on the rig after the watchdog
+`defocusviewer watch` follows pos-control. For every StabilityTest, TrackingTest, PointingTest or LuminosityTest run that finishes on the rig after the watchdog
 started:
 
 1. It fetches the run, with a "fetch (watchdog)" job in the Jobs tab.

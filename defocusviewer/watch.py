@@ -1,4 +1,4 @@
-"""Watchdog of the rig: fetches every StabilityTest, TrackingTest and PointingTest run that finishes on pos-control after the watchdog starts, makes its
+"""Watchdog of the rig: fetches every StabilityTest, TrackingTest, PointingTest and LuminosityTest run that finishes on pos-control after the watchdog starts, makes its
 variant `<run>_tophatbl-circle` (tophat_bl@circle, ghost mask on, lambda scan 650-750 nm) and runs the full analysis of
 the variant on the two P100s of farm-gpu1, one run at a time, as soon as no GPU analysis (ours or another session's)
 runs there and both P100s are idle.
@@ -26,8 +26,8 @@ TMUX_SESSION = "defocusviewer-watch"
 SUFFIX, SOURCE, APERTURE, GHOST = "tophatbl-circle", "tophat_bl", "circle", "on"
 FIT = {"lbda_range_nm": [650.0, 750.0]}
 GPU_HOST, N_GPUS = "farm-gpu1", 2
-MATCH = re.compile(r"stability|tracking|pointing")   # rig runs the watchdog takes (named stability-..., tracking-..., pointing-...)
-FLOWS = ("stability", "tracking", "pointing")        # their analysis flows, checked on the dataframe
+MATCH = re.compile(r"stability|tracking|pointing|luminosity")   # rig runs the watchdog takes (named stability-..., tracking-...)
+FLOWS = ("stability", "tracking", "pointing", "luminosity")        # their analysis flows, checked on the dataframe
 RIG_POLL_S, TICK_S = 300, 60
 FETCH_TRIES = 3
 

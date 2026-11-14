@@ -18,7 +18,6 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from DefocusTest import fit, psf, psf_batch
-from DefocusTest.define import POINTING_ROUTINES
 
 from . import catalog, cluster, figures, jobs, jointfit, lab, plots, spots, summary, variants
 from .config import Config
@@ -26,8 +25,6 @@ from .config import Config
 STATIC = Path(__file__).parent / "static"
 COOKIE = "defocusviewer"
 PARTITIONS = ("express", "standard", "long", "verylong")
-ROUTINE_ORDER = ("train_burnin", "train", "train2", "stability", "detection", "positioner", "pre_tracking", "tracking", *POINTING_ROUTINES,
-                 "train_end")
 DETAIL_CACHE = 32           # spots whose detail is kept in memory (about 0.7 MB each)
 LOGIN_HINT = ("<h3>defocusViewer: not logged in</h3><p>Open the login URL printed by <code>defocusviewer url</code> "
               "on farm-gpu1 (it sets a cookie in this browser).</p>")
@@ -300,7 +297,7 @@ def create_app(config: Config, token: str, background: bool = True) -> FastAPI:
         table = spots.fiber_frame(run_path(run))
         quantities = [[q, *figures.FIBER_QUANTITIES[q][:2]] for q in figures.FIBER_QUANTITIES
                       if q in table.columns and table[q].notna().any()]
-        routines = [r for r in ROUTINE_ORDER if r in set(table["routine"])] + sorted(set(table["routine"]) - set(ROUTINE_ORDER))
+        routines = sorted(set(table["routine"]), key=catalog.routine_sort_key)
         return {"fibers": sorted(table["fiber"].unique()), "routines": routines, "quantities": quantities,
                 "x_axes": figures.X_AXES, "has_x_position": bool("x_position" in table and table["x_position"].notna().any())}
 

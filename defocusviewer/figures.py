@@ -8,9 +8,10 @@ import matplotlib.dates as mdates
 import numpy as np
 import pandas as pd
 from amkit import plot
-from DefocusTest.define import POINTING_ROUTINES
 from matplotlib.lines import Line2D
 from matplotlib.patches import Rectangle
+
+from .catalog import series_of
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
@@ -29,9 +30,8 @@ FIBER_QUANTITIES = {      # column: (label, unit, column of its sigma)
     "texp": ("exposure", "us", None),
 }
 X_AXES = {"time": "time", "minutes": "minutes since the first spot", "x_position": "stage position (um)", "index": "spot index"}
-ROUTINE_MARKERS = {"train_burnin": "x", "train": "o", "train2": "s", "stability": ".", "detection": ".", "positioner": ".", "pre_tracking": ".", "tracking": ".",
-                   **{r: "." for r in POINTING_ROUTINES},
-                   "train_end": "D"}
+ROUTINE_MARKERS = {"train_burnin": "x", "train": "o", "train2": "s", "stability": ".", "detection": ".", "positioner": ".",
+                   "tracking": ".", "pointing": ".", "luminosity": ".", "train_end": "D"}    # holds by series (catalog.series_of)
 COLOUR_MAPS = {"viridis": "viridis", "cividis": "cividis", "inferno": "inferno", "magma": "magma", "gray": "gray",
                "hot": "hot", "blues": "am_seq", "blue-red": "am_div", "purple-green": "PRGn", "brown-teal": "BrBG"}
 
@@ -97,7 +97,7 @@ def fiber_figure(table: pd.DataFrame, quantities, fibers, routines, x_axis: str 
                     order = np.argsort(x.to_numpy(), kind="stable")
                     x = x.iloc[order]
                     y = (rows[quantity].iloc[order] - offset).rolling(max(1, average), center=True, min_periods=1).mean()
-                    marker = ROUTINE_MARKERS.get(routine, "v")
+                    marker = ROUTINE_MARKERS.get(series_of(routine), "v")
                     ax.plot(x, y, marker=marker, ms=2.2 if marker == "." else 2.8, lw=0.5, color=colour[fiber],
                             markeredgewidth=0.6)
                     if errors and sigma and sigma in rows and rows[sigma].notna().any():
@@ -111,7 +111,7 @@ def fiber_figure(table: pd.DataFrame, quantities, fibers, routines, x_axis: str 
         if x_axis == "time":
             bottom.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M"))
         handles = [Line2D([], [], color=colour[f], lw=1.2, label=f) for f in fibers]
-        handles += [Line2D([], [], color=plot.MUTED, marker=ROUTINE_MARKERS.get(r, "v"), lw=0, label=r) for r in routines]
+        handles += [Line2D([], [], color=plot.MUTED, marker=ROUTINE_MARKERS.get(series_of(r), "v"), lw=0, label=r) for r in routines]
         axes[0, 0].legend(handles=handles, loc="lower center", bbox_to_anchor=(0.5, 1.02), ncol=min(len(handles), 10), fontsize=6,
                           frameon=False, columnspacing=1.0, handlelength=1.5)
         notes = ["each fiber minus its median"] * relative + [f"moving average over {average} spots"] * (average > 1)

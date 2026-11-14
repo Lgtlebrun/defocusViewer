@@ -7,16 +7,6 @@ from defocusviewer import jointfit
 from .conftest import make_rundir
 
 
-def test_fnum_from_the_run_name():
-    assert jointfit.guess_fnum(Path("/x/20261017-175317_stability-fnum4-2")) == (4.0, "run name")
-    assert jointfit.guess_fnum(Path("/x/20261014-185836_stability-rawframes-apf1p8")) == (1.8, "run name")
-    assert jointfit.guess_fnum(Path("/x/20261015-155646_hexagonal-aperture-fit")) == (None, "unknown")
-
-
-def test_fnum_from_the_config(rundir):
-    assert jointfit.guess_fnum(rundir) == (4.0, "config")
-
-
 def test_positioners_matched_by_centre():
     """pos_0 and pos_1 swap labels between the two aperture runs of 2026-10-15 (centres from their label maps)."""
     circular = {"Fa": (567, 1782), "pos_0": (1869, 1755), "pos_1": (2033, 1915), "pos_2": (1861, 2304)}

@@ -15,22 +15,19 @@ import numpy as np
 import pandas as pd
 from DefocusTest import fit, psf
 from DefocusTest.analysis.JointFitHealthchecks import odd, psf_image, pupil_grid
-from DefocusTest.analysis.SpotLabeler import drop_overwritten_images, load_labeled_dataframe, load_labeled_result_df
+from DefocusTest.analysis.SpotLabeler import drop_overwritten_images, hold_rows, load_labeled_dataframe, load_labeled_result_df
 from DefocusTest.analysis.ZernikeStabilityAnalysis import _fit_candidate, load_crop_side, load_fnum, load_pupil_scale
-from DefocusTest.define import POINTING_ROUTINES
 from DefocusTest.devices import DESI
 from DefocusTest.imgDF import load_stack
 from DefocusTest.postprocessing import GhostMasks, detect_frames, fiber_ghost_table
 from PIL import Image
 from posUtils.define import UMperCOUNT
 
-from .catalog import _mtime, open_rundir
+from .catalog import _mtime, open_rundir, series_of
 
 HOLD_ROUTINES = {"stability": "ZernikeStabilityTimeSeries", "detection": "ZernikeDetectionTimeSeries",
                  "positioner": "ZernikePositionerTimeSeries", "tracking": "ZernikeTrackingTimeSeries",
-                 "pointing": "ZernikePointingTimeSeries"}
-SERIES_ROWS = {"tracking": ("pre_tracking", "tracking"), "pointing": POINTING_ROUTINES}   # routines of the rows a series is fitted over, if not its own
-SERIES_OF = {"pre_tracking": "tracking", **{r: "pointing" for r in POINTING_ROUTINES}}      # series a routine's frames belong to, if not its own
+                 "pointing": "ZernikePointingTimeSeries", "luminosity": "ZernikeLuminosityTimeSeries"}   # series: analysis
 GHOST_LINE = re.compile(r"\[(?:\w+:)?(\w+)\] : (\S+): ghost mask applied")
 STEPS_LINE = re.compile(r"Analysis steps of \S+: \[(.*)\]")
 COLUMNS = ["img", "fiber", "routine", "x_position", "timestamp", "texp", "n_frames", "mom_center_x", "mom_center_y"]
@@ -118,10 +115,15 @@ class RunState:
         return fits
 
     def _hold_fits(self, fits, fiber, routine, analysis, series):
-        """Hold frames of a fiber, in time order, against the rows of its series (as ModelFitPlots._hold)."""
-        rows = SERIES_ROWS.get(routine, (routine,))
-        frames = self.df[(self.df["fiber"] == fiber) & self.df["routine"].isin(rows)].sort_values("timestamp")
-        if len(frames) != len(series["c4"]):
+        """Hold frames of a fiber, in time order, against the rows of its series (as ModelFitPlots._hold): the routines of
+        that series (catalog.series_of), else every hold row of the fiber (SpotLabeler.hold_rows, what the pipeline
+        fits since 2026-11-14 when a run holds more routines)."""
+        mine = self.df[self.df["fiber"] == fiber]
+        for frames in (mine[mine["routine"].map(series_of) == routine], hold_rows(mine)):
+            frames = frames.sort_values("timestamp")
+            if len(frames) == len(series["c4"]):
+                break
+        else:
             return
         noll = [int(j) for j in series["zernike_noll"]]
         ghost = self._ghost_of(analysis, fiber)
@@ -411,7 +413,7 @@ def refit(path: Path, img: str, ghost: str, folder: Path, map_function=map) -> d
     row = st.df.loc[img]
     fiber, routine = str(row["fiber"]), str(row["routine"])
     image = st.image(img)
-    series_routine = SERIES_OF.get(routine, routine)
+    series_routine = series_of(routine)
     series_path = path / "results" / f"{fiber}_{series_routine}_timeseries_zernike.npz"
     series = dict(np.load(series_path, allow_pickle=True)) if series_routine in HOLD_ROUTINES and series_path.exists() else None
     noll = tuple(int(j) for j in series["zernike_noll"]) if series is not None else st.noll

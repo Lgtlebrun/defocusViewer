@@ -21,6 +21,8 @@ class Config:
         "defocusApSim-b": Path.home() / "projects" / "defocusApSim-b" / "data"})
     test: str = "Defocus"
     remote_devices: list = field(default_factory=lambda: ["Orbray6", "MPS6", "calibration_stand"])
+    # run list tags: a run gets each of these words found in its name (any case) or naming its hold routine
+    run_tags: list = field(default_factory=lambda: ["stability", "tracking", "pointing", "detection", "luminosity"])
     host: str = "0.0.0.0"
     port: int = 8765
     state_dir: Path = Path("/disk/users/llebru/defocusViewer")
