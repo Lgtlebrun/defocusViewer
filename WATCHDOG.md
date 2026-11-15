@@ -1,6 +1,6 @@
-# Rig watchdog
+# Lab computer watchdog
 
-`defocusviewer watch` follows the rig computer (`pos-control` in the original deployment). For every StabilityTest, TrackingTest, PointingTest or LuminosityTest run that finishes on the rig after the watchdog
+`defocusviewer watch` follows the lab computer (`pos-control` in the original deployment). For every StabilityTest, TrackingTest, PointingTest or LuminosityTest run that finishes on the lab computer after the watchdog
 started:
 
 1. It fetches the run, with a "fetch (watchdog)" job in the Jobs tab.
@@ -17,7 +17,7 @@ The analyses run one at a time, oldest run first. A queued run starts only when 
   by other sessions.
 - Both GPUs are idle.
 
-When the watchdog is first started, it records every run already finished on the rig as a baseline and never touches
+When the watchdog is first started, it records every run already finished on the lab computer as a baseline and never touches
 those runs.
 
 `<state_dir>` is the viewer state folder of the configuration. The code is in `defocusviewer/watch.py`. Its state, log and on/off switch are in `<state_dir>/watch/`:
@@ -71,7 +71,7 @@ tail -f <state_dir>/watch/watch.log
 A restart keeps `state.json`. The baseline and the runs it already handled stay as they were, so nothing is fetched or
 analysed twice.
 
-To start over with a new baseline (every run finished on the rig at that moment), stop the watchdog, delete
+To start over with a new baseline (every run finished on the lab computer at that moment), stop the watchdog, delete
 `state.json`, then start it.
 
 To have one run handled again, delete that run's entry from `state.json` while the watchdog is stopped.
