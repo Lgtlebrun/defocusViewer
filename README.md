@@ -1,5 +1,7 @@
 # defocusViewer
 
+![defocusViewer UI](docs/defocusViewer.png)
+
 A browser GUI that helps analyse and visualise defocused light spots emitted by optical fibres, in the context of the
 characterisation of robotic fibre positioners for spectroscopic surveys.
 
