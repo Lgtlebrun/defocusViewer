@@ -4,7 +4,7 @@ A browser GUI that helps analyse and visualise defocused light spots emitted by 
 characterisation of robotic fibre positioners for spectroscopic surveys.
 
 It is a small web service (FastAPI backend, plain ES-module frontend, vendored Plotly) on top of a tree of run directories
-and a spot-fitting library.
+and a spot-fitting library based on Fourier optics (Zernike aberrations).
 
 > **Scope.** This repository contains only the viewer. The acquisition code, the fitting library (`DefocusTest`), the run
 > directory layer (`posUtils`) and the resource helpers (`amkit`) are separate packages that must be installed in the same
