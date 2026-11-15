@@ -1,6 +1,6 @@
 # defocusViewer
 
-A browser GUI for the Defocus test. It runs as one service on farm-gpu1 and does five things:
+A browser GUI for the Defocus test. It runs as one service on UZH's gpu server and does five things:
 - browses the rundirs and their figures;
 - opens single spots with their metadata and fit (model, residual, FFT views, with or without the ghost mask);
 - compares spots side by side;
@@ -12,17 +12,6 @@ A browser GUI for the Defocus test. It runs as one service on farm-gpu1 and does
 - Open the login URL once per browser. Print it with `defocusviewer url` (from `~/Defocus/.venv`). It sets a cookie; every other request needs it.
 - The service runs in tmux session `defocusviewer`. A crontab line restarts it when it stops answering: `defocusviewer ensure`, every 5 min.
 - The server log is in `/disk/users/llebru/defocusViewer/server.log`.
-
-## What it reads and writes
-
-| | Location |
-|---|---|
-| Runs | `$POS_LOCAL_DATA/<device>/Defocus/<rundir>` (default `/disk/users/llebru/Defocus`), plus the extra roots of the config. Browsing never writes into a rundir. |
-| Raw data | A rundir's `data/` (the rig's stacks and acquisition tables, 90 % of its bytes) is a symlink to `/disk/data1/des/Leonard/Defocus/<device>/Defocus/<rundir>/data` (`raw_root`, farm-se1 NFS, seen by farm-gpu1 and farm-gpu2). results/, plot/, meta/ and the logs stay in the rundir. See [Raw data](#raw-data). |
-| Runs on the rig | `pos-control:/mnt/data1/positioners/data/<device>/Defocus`, listed over SSH every 10 min. Fetch copies with rsync and never deletes. |
-| Viewer state | `/disk/users/llebru/defocusViewer/`: `jobs/` (one JSON and log per job) and `spotfits/` (spots the viewer fitted). |
-| Thumbnails | `/scratch/llebru/defocusViewer/` |
-| Settings | `~/.config/defocusViewer/config.toml` overrides the defaults of `defocusviewer/config.py`: hosts, roots, port, job resources. The login secret is `~/.config/defocusViewer/token`. |
 
 ## How it models a spot
 
