@@ -47,7 +47,7 @@ export async function renderSpots(body, info) {
     els.left = h('div', { class: 'spots-left' });
     els.right = h('div', { class: 'spots-right' });
     let wide = false;
-    try { wide = localStorage.getItem('spotsWide') === 'true'; } catch { /* storage blocked */ }
+    try { wide = localStorage.getItem('spotsWide') === 'true' && !!getHash().img; } catch { /* storage blocked */ }   // wide hides the list: only with a spot open, whose toolbar has the toggle
     body.replaceChildren(h('div', { class: `spots${wide ? ' wide' : ''}` }, els.left, els.right));
     renderLeft();
   }
